@@ -1,4 +1,4 @@
-import { styleText } from "node:util";
+import util from "node:util";
 
 import { CREDITS_PER_DOLLAR } from "@meterapp/car-image-sdk";
 
@@ -45,6 +45,7 @@ export function createIo(flags: Record<string, FlagValue>, env: Env = process.en
 
 /** Colors via `util.styleText` (Node 20.12+); plain text elsewhere or when disabled. */
 export function paint(io: Pick<Io, "color">, style: Style | Style[], text: string): string {
+  const { styleText } = util;
   if (!io.color || typeof styleText !== "function") return text;
   try {
     return styleText(style, text);
