@@ -1,0 +1,91 @@
+{
+  "name": "@meterapp/car-image-sdk",
+  "version": "1.44.0",
+  "description": "TypeScript SDK for the Car Image API by Meter: studio-quality, transparent-background renders of any vehicle in the open @meterapp/vehicle-db catalog in any paint color, catalog make logos, VIN decoding, stable vehicle ids and textured 3D models. Zero runtime dependencies; works in Node 20+, edge runtimes and browsers.",
+  "license": "MIT",
+  "author": "Meter <support@carimage.dev> (https://meterapp.co)",
+  "homepage": "https://carimage.dev",
+  "bugs": {
+    "url": "https://carimage.dev/docs/feedback?ref=npm-sdk",
+    "email": "support@carimage.dev"
+  },
+  "keywords": [
+    "car",
+    "vehicle",
+    "image",
+    "api",
+    "sdk",
+    "png",
+    "webp",
+    "transparent",
+    "render",
+    "mcp",
+    "agents",
+    "meter"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "default": "./dist/mcp/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepare": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": ">=18.3.0",
+    "zod": "^4.2.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "react": "19.3.1",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^5.1.0",
+    "zod": "^4.6.5",
+    "@types/react-dom": "^19.3.0",
+    "react-dom": "19.3.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MeterApp/car-image-packages.git",
+    "directory": "packages/sdk"
+  }
+}

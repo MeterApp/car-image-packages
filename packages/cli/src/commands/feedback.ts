@@ -1,0 +1,305 @@
+import { readFile } from "node:fs/promises";
+import { REQUEST_KINDS, REQUEST_SORTS, REQUEST_STATUSES, type FiledFeedbackResponse, type IssueContext, type OwnReview, type RequestRecord } from "@meterapp/car-image-sdk";
+import { flagBoolean, flagChoice, flagInteger, flagString } from "../args.js";
+import { lastErrorPath } from "../config.js";
+import type { CommandContext, CommandDefinition } from "../context.js";
+import { CliError } from "../errors.js";
+import { keyValues, paint, printJson, table } from "../output.js";
+import { CLI_VERSION } from "../version.js";
+import { rateImageCommand } from "./catalog.js";
+import { requestLabel, requestPageLink, SIGN_IN_HINT, votesLabel } from "./request.js";
+
+/**
+ * The feedback board from a terminal (docs/customer-feedback.md, "Surfaces"):
+ * the same actions as the REST API and the MCP tools. `car-image feedback`
+ * with --rating/--good/--bad still rates a delivered image, as before.
+ */
+const SUBCOMMANDS = ["list", "show", "mine", "request", "report", "upvote", "comment"] as const;
+const USAGE = [
+  "car-image feedback list [--kind feature|issue|vehicle] [--status open|planned|in_progress|done|declined|duplicate] [--sort top|new|recent_activity] [--q <text>] [--limit 25] [--json]",
+  "car-image feedback show <id>",
+  "car-image feedback mine",
+  'car-image feedback request "<title>" [--details "..."] [--force]',
+  'car-image feedback report "<what went wrong>" [--details "..."] [--request-id <id> | --last] [--force]',
+  "car-image feedback upvote <id> [--remove]",
+  'car-image feedback comment <id> "<text>"',
+  "car-image feedback (--request-id <id> | --vehicle <veh_…> | --make … --model … --year …) (--rating 1-5 | --good | --bad)   rate an image",
+].join("\n");
+
+function requireSignIn(ctx: CommandContext): void {
+  if (!ctx.clientContext.apiKey) throw new CliError("Not signed in.", 1, SIGN_IN_HINT);
+}
+
+function requireId(ctx: CommandContext, action: string): string {
+  const id = ctx.args.positionals[1]?.trim();
+  if (!id) throw new CliError("Missing item id", 2, `Example: car-image feedback ${action} <id> — ids come from \`car-image feedback list\`.`);
+  return id;
+}
+
+function printList(ctx: CommandContext, data: RequestRecord[], empty: string): void {
+  if (data.length === 0) {
+    ctx.io.stdout(`${empty}\n`);
+    return;
+  }
+  const rows = data.map((item) => [String(item.votes), item.kind, requestLabel(item), item.id, item.status + (item.visibility === "private" ? " (private)" : "")]);
+  ctx.io.stdout(`${table(rows, ["votes", "kind", "title", "id", "status"])}\n`);
+}
+
+async function list(ctx: CommandContext, mine: boolean): Promise<number> {
+  const { flags } = ctx.args;
+  if (mine) requireSignIn(ctx);
+  const params = {
+    kind: flagChoice(flags, "kind", REQUEST_KINDS),
+    status: flagChoice(flags, "status", REQUEST_STATUSES),
+    sort: mine ? ("recent_activity" as const) : flagChoice(flags, "sort", REQUEST_SORTS),
+    q: flagString(flags, "q"),
+    limit: flagInteger(flags, "limit", { min: 1, max: 100 }),
+    cursor: flagString(flags, "cursor"),
+  };
+  const result = mine ? await ctx.clientContext.client.listMyFeedback(params) : await ctx.clientContext.client.listFeedback(params);
+  if (ctx.io.json) {
+    printJson(ctx.io, result);
+    return 0;
+  }
+  printList(ctx, result.data, mine ? "Nothing yet. car-image feedback request \"<idea>\" or car-image feedback report \"<problem>\"." : "Nothing matches.");
+  if (result.next_cursor) ctx.io.stdout(`\n${paint(ctx.io, "dim", `More: car-image feedback ${mine ? "mine" : "list"} --cursor ${result.next_cursor}`)}\n`);
+  if (!mine && result.data.length) ctx.io.stdout(`\n${paint(ctx.io, "dim", "Upvote with: car-image feedback upvote <id>")}\n`);
+  return 0;
+}
+
+async function show(ctx: CommandContext): Promise<number> {
+  const id = requireId(ctx, "show");
+  const result = await ctx.clientContext.client.getFeedback(id);
+  if (ctx.io.json) {
+    printJson(ctx.io, result);
+    return 0;
+  }
+  const item = result.data;
+  const rows: Array<[string, string]> = [
+    ["title", requestLabel(item)],
+    ["kind", item.kind + (item.visibility === "private" ? " (private)" : "")],
+    ["status", item.status + (item.duplicate_of ? ` → ${item.duplicate_of}` : "")],
+    ["votes", `${item.votes}${item.viewer?.voted ? " (including yours)" : ""}`],
+    ["comments", String(item.comment_count)],
+    ["by", item.author],
+    ["created", item.created_at],
+    ["id", item.id],
+  ];
+  if (item.url) rows.push(["url", requestPageLink(item.url)]);
+  ctx.io.stdout(`${keyValues(ctx.io, rows)}\n`);
+  if (item.body) ctx.io.stdout(`\n${item.body}\n`);
+  if (item.timeline?.length) {
+    ctx.io.stdout(`\n${paint(ctx.io, "bold", "Timeline")}\n`);
+    for (const event of item.timeline) {
+      const what = event.type === "status" ? `${event.from ?? "posted"} → ${event.to}` : event.type === "response" ? "official response" : "linked";
+      ctx.io.stdout(`${paint(ctx.io, "dim", event.at)}  ${what}${event.note ? `: ${event.note}` : ""}\n`);
+    }
+  }
+  if (item.comments.length) {
+    ctx.io.stdout(`\n${paint(ctx.io, "bold", `Comments (${item.comments.length})`)}\n`);
+    for (const comment of item.comments) {
+      ctx.io.stdout(`${paint(ctx.io, "dim", `${comment.official ? "[official] " : ""}${comment.author} · ${comment.created_at}`)}\n  ${comment.body}\n`);
+    }
+  }
+  return 0;
+}
+
+function printFiled(ctx: CommandContext, result: FiledFeedbackResponse, kind: "feature" | "issue"): number {
+  if (ctx.io.json) {
+    printJson(ctx.io, result);
+    return 0;
+  }
+  if (result.created && result.data) {
+    const page = result.data.url ? ` ${paint(ctx.io, "underline", requestPageLink(result.data.url))}` : "";
+    ctx.io.stdout(`${kind === "issue" ? "Reported (private to you and the team)" : "Requested"}: ${result.data.title}.${page}\n`);
+    ctx.io.stdout(`${paint(ctx.io, "dim", "Thanks — you get an email now and at every status change.")}\n`);
+    return 0;
+  }
+  ctx.io.stdout(`Not filed: ${result.similar.length} similar item(s) already exist.\n`);
+  printList(ctx, result.similar, "");
+  ctx.io.stdout(`\n${paint(ctx.io, "dim", `Upvote the one that matches: car-image feedback upvote <id>. None of them? Add --force.`)}\n`);
+  return 0;
+}
+
+async function request(ctx: CommandContext): Promise<number> {
+  requireSignIn(ctx);
+  const title = ctx.args.positionals.slice(1).join(" ").trim();
+  if (!title) throw new CliError("Provide a title", 2, 'Example: car-image feedback request "Interior views" --details "dashboard and seats"');
+  const result = await ctx.clientContext.client.requestFeature({ title, body: flagString(ctx.args.flags, "details"), force: flagBoolean(ctx.args.flags, "force") });
+  return printFiled(ctx, result, "feature");
+}
+
+interface LastError {
+  request_id: string | null;
+  command: string;
+  status: number;
+  error_code: string | null;
+}
+
+/** The failure `car-image` remembered last (see main.ts). */
+export async function readLastError(path: string): Promise<LastError | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as LastError;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function report(ctx: CommandContext): Promise<number> {
+  requireSignIn(ctx);
+  const title = ctx.args.positionals.slice(1).join(" ").trim();
+  if (!title) throw new CliError("Say what went wrong in a line", 2, 'Example: car-image feedback report "Side view of the 2024 Camry returns 502" --last');
+  const { flags } = ctx.args;
+  const context: IssueContext = { client: "car-image-cli", client_version: CLI_VERSION };
+  let requestId = flagString(flags, "request-id");
+  if (flagBoolean(flags, "last") && !requestId) {
+    const last = await readLastError(lastErrorPath(ctx.env));
+    if (!last) throw new CliError("No failed request remembered yet", 2, "Pass --request-id <id> from the error, or run the failing command once more.");
+    requestId = last.request_id ?? undefined;
+    context.endpoint = `car-image ${last.command}`;
+    context.status = last.status;
+    if (last.error_code) context.error_code = last.error_code;
+  }
+  const result = await ctx.clientContext.client.reportIssue({ title, body: flagString(flags, "details"), requestId, context, force: flagBoolean(flags, "force"), attachLastError: false });
+  return printFiled(ctx, result, "issue");
+}
+
+async function upvote(ctx: CommandContext): Promise<number> {
+  requireSignIn(ctx);
+  const id = requireId(ctx, "upvote");
+  const remove = flagBoolean(ctx.args.flags, "remove");
+  const result = remove ? await ctx.clientContext.client.removeFeedbackVote(id) : await ctx.clientContext.client.upvoteFeedback(id);
+  if (ctx.io.json) {
+    printJson(ctx.io, result);
+    return 0;
+  }
+  ctx.io.stdout(`${remove ? "Vote removed from" : "Upvoted"} ${requestLabel(result.data)} — ${votesLabel(result.data.votes)}.\n`);
+  return 0;
+}
+
+async function comment(ctx: CommandContext): Promise<number> {
+  requireSignIn(ctx);
+  const id = requireId(ctx, "comment");
+  const text = ctx.args.positionals.slice(2).join(" ").trim();
+  if (!text) throw new CliError("Provide the comment text", 2, 'Example: car-image feedback comment <id> "Also the hybrid trim, please"');
+  const result = await ctx.clientContext.client.commentOnFeedback(id, text);
+  if (ctx.io.json) {
+    printJson(ctx.io, result);
+    return 0;
+  }
+  ctx.io.stdout(`Comment added to ${result.data.request_id}.\n`);
+  return 0;
+}
+
+export const feedbackCommand: CommandDefinition = {
+  name: "feedback",
+  summary: "Request features, report issues with the request attached, upvote and comment (free); --rating rates an image",
+  usage: USAGE,
+  async run(ctx: CommandContext): Promise<number> {
+    const { flags } = ctx.args;
+    const action = ctx.args.positionals[0]?.toLowerCase();
+    if (!action && (flags.rating !== undefined || flags.good === true || flags.bad === true)) return rateImageCommand.run(ctx);
+    switch (action ?? "list") {
+      case "list":
+        return list(ctx, false);
+      case "mine":
+        return list(ctx, true);
+      case "show":
+        return show(ctx);
+      case "request":
+        return request(ctx);
+      case "report":
+        return report(ctx);
+      case "upvote":
+        return upvote(ctx);
+      case "comment":
+        return comment(ctx);
+      default:
+        throw new CliError(`Unknown feedback action "${action}"`, 2, `Use one of: ${SUBCOMMANDS.join(", ")}. Run \`car-image feedback --help\` for usage.`);
+    }
+  },
+};
+
+function printReview(ctx: CommandContext, review: OwnReview): void {
+  const rows: Array<[string, string]> = [
+    ["rating", `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}`],
+    ["status", review.status],
+    ["name", review.display_name],
+  ];
+  if (review.title) rows.push(["title", review.title]);
+  if (review.response) rows.push(["our reply", review.response.body]);
+  ctx.io.stdout(`${keyValues(ctx.io, rows)}\n`);
+}
+
+export const reviewCommand: CommandDefinition = {
+  name: "review",
+  summary: "Post or edit your public review of Car Image (free); with no flags, show yours",
+  usage:
+    'car-image review [--rating 1-5] [--title "..."] [--body "..."] [--likes "..."] [--dislikes "..."] [--use-case "..."] [--name "..."] [--company "..."] [--quote-ok]',
+  async run(ctx: CommandContext): Promise<number> {
+    requireSignIn(ctx);
+    const { flags } = ctx.args;
+    const rating = flagInteger(flags, "rating", { min: 1, max: 5 });
+    if (rating === undefined) {
+      const mine = await ctx.clientContext.client.getMyReview();
+      if (ctx.io.json) {
+        printJson(ctx.io, mine);
+        return 0;
+      }
+      if (!mine.data) {
+        ctx.io.stdout('No review yet. Write one: car-image review --rating 5 --body "What it does for you"\n');
+        return 0;
+      }
+      printReview(ctx, mine.data);
+      return 0;
+    }
+    const result = await ctx.clientContext.client.submitReview({
+      rating,
+      title: flagString(flags, "title"),
+      body: flagString(flags, "body"),
+      likes: flagString(flags, "likes"),
+      dislikes: flagString(flags, "dislikes"),
+      use_case: flagString(flags, "use-case"),
+      display_name: flagString(flags, "name"),
+      display_company: flagString(flags, "company"),
+      marketing_consent: flagBoolean(flags, "quote-ok"),
+    });
+    if (ctx.io.json) {
+      printJson(ctx.io, result);
+      return 0;
+    }
+    ctx.io.stdout(`${result.created ? "Thanks for the review" : "Review updated"}.\n`);
+    if (result.data) printReview(ctx, result.data);
+    if (result.data?.status === "pending") ctx.io.stdout(`${paint(ctx.io, "dim", "It shows on carimage.dev/reviews after a quick check.")}\n`);
+    return 0;
+  },
+};
+
+export const reviewsCommand: CommandDefinition = {
+  name: "reviews",
+  summary: "Read the public reviews of Car Image and the team's answers",
+  usage: "car-image reviews [--sort newest|highest|lowest] [--rating 1-5] [--limit 20] [--json]",
+  async run(ctx: CommandContext): Promise<number> {
+    const { flags } = ctx.args;
+    const result = await ctx.clientContext.client.listReviews({
+      sort: flagChoice(flags, "sort", ["newest", "highest", "lowest"] as const),
+      rating: flagInteger(flags, "rating", { min: 1, max: 5 }),
+      limit: flagInteger(flags, "limit", { min: 1, max: 100 }),
+      cursor: flagString(flags, "cursor"),
+    });
+    if (ctx.io.json) {
+      printJson(ctx.io, result);
+      return 0;
+    }
+    const { summary } = result;
+    ctx.io.stdout(summary.count === 0 ? "No reviews yet.\n" : `${summary.count} review(s), average ${summary.average} of 5.\n\n`);
+    for (const review of result.data) {
+      ctx.io.stdout(`${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}  ${paint(ctx.io, "bold", review.title ?? "")} ${paint(ctx.io, "dim", `— ${review.display_name}, ${review.created_at.slice(0, 10)}`)}\n`);
+      if (review.body) ctx.io.stdout(`  ${review.body}\n`);
+      if (review.response) ctx.io.stdout(`  ${paint(ctx.io, "dim", `Car Image: ${review.response.body}`)}\n`);
+      ctx.io.stdout("\n");
+    }
+    return 0;
+  },
+};

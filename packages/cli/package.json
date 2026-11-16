@@ -1,0 +1,65 @@
+{
+  "name": "@meterapp/car-image",
+  "version": "1.35.0",
+  "mcpName": "dev.carimage/car-image",
+  "description": "CLI and MCP server for the Car Image API by Meter: studio-quality, transparent-background vehicle renders for agents, apps and browsers. Login, fetch images in any paint color and make logos, mint signed URLs, decode VINs, build 3D models, request missing vehicles, run diagnostics, configure agents.",
+  "license": "MIT",
+  "author": "Meter <support@carimage.dev> (https://meterapp.co)",
+  "homepage": "https://carimage.dev",
+  "bugs": {
+    "url": "https://carimage.dev/docs/feedback?ref=npm-cli",
+    "email": "support@carimage.dev"
+  },
+  "keywords": [
+    "car",
+    "vehicle",
+    "image",
+    "api",
+    "cli",
+    "mcp",
+    "mcp-server",
+    "agents",
+    "claude",
+    "cursor",
+    "chatgpt",
+    "meter"
+  ],
+  "type": "module",
+  "bin": {
+    "car-image": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepare": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@meterapp/car-image-sdk": "^1.44.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^5.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MeterApp/car-image-packages.git",
+    "directory": "packages/cli"
+  }
+}
