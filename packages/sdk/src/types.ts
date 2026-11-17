@@ -1670,6 +1670,19 @@ export interface AccountOrganization {
   role: OrgRole | null;
 }
 
+/** The Terms that govern an account's deliveries ({@link AccountResponse} `data.terms`). */
+export interface AccountTerms {
+  version: "2026-10-12" | "2026-10-25";
+  /** True while the account keeps the 2026-10-12 terms it paid for before 2026-10-25. */
+  legacy: boolean;
+  /** ISO 8601 cutover to the 2026-10-25 terms for a legacy account; null when none is scheduled or not legacy. */
+  cutover_at: string | null;
+  /** What happens to the license when a paid plan ends, quoted from those Terms. */
+  after_plan: string;
+  /** `/terms#license`. */
+  url: string;
+}
+
 /** `GET /api/v1/account/members` and the `list_members` tool: who is in the organization, read only. */
 export interface AccountMembers {
   organization: AccountOrganization;
@@ -1702,6 +1715,14 @@ export interface AccountResponse {
      * organization page. Absent on servers that predate it.
      */
     default_market?: Market | null;
+    /**
+     * Which version of the Terms governs what this account is delivered now:
+     * accounts that paid before 2026-10-25 keep the version of 2026-10-12
+     * until the cutover date in their notice (`cutover_at`, null while none is
+     * scheduled); every other account is on 2026-10-25. `after_plan` quotes
+     * what the license does when a paid plan ends. Absent on servers before 2026-11-17.
+     */
+    terms?: AccountTerms;
     pricing: PricingInfo & { packs?: CreditPack[]; plans?: PublicPlan[] };
     usage_30d?: { requests: number; images: number; cache_hit_rate: number };
     /** Usage against every limit the plan sets this period; absent on servers before 2026-10-17. */
