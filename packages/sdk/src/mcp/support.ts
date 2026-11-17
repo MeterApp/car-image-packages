@@ -8,13 +8,13 @@ import { z } from "zod";
  */
 export const checkoutLinkSchema = z.object({
   credits: z.union([z.literal(100), z.literal(500), z.literal(1000), z.literal(2500), z.literal(10000)]).optional(),
-  plan: z.enum(["pro", "business"]).optional(),
+  plan: z.enum(["starter", "pro", "business"]).optional(),
   interval: z.enum(["month", "year"]).optional(),
 }).strict().refine((value) => (value.credits !== undefined) !== (value.plan !== undefined), "Provide exactly one of credits or plan")
   .refine((value) => !value.interval || !!value.plan, "interval requires plan");
 /** create_checkout_link's input: a plan (credits are no longer sold). */
 export const checkoutLinkToolSchema = z.object({
-  plan: z.enum(["pro", "business"]).describe("The plan to link to. Credits are not sold; a plan includes vehicle images and credits every month."),
+  plan: z.enum(["starter", "pro", "business"]).describe("The plan to link to. Credits are not sold; a plan includes vehicle images and credits every month."),
   interval: z.enum(["month", "year"]).optional().describe("Defaults to month."),
 }).strict();
 export const helpQuerySchema = z.object({ report_gap: z.boolean().optional().describe("Set true when prior results did not answer this question, to flag missing context for staff."), query: z.string().trim().min(2).max(1000).describe("One product question. Do not include personal information, credentials or full customer emails; queries are recorded privately to improve help articles.") }).strict();
@@ -22,7 +22,7 @@ export const billingLinkResultSchema = z.looseObject({
   data: z.object({
     url: z.string().url(), session_id: z.string().nullable().optional(), kind: z.enum(["checkout", "portal", "dashboard"]),
     requires_confirmation: z.literal(true), message: z.string(),
-    credits: z.number().optional(), plan: z.enum(["pro", "business"]).optional(),
+    credits: z.number().optional(), plan: z.enum(["starter", "pro", "business"]).optional(),
     interval: z.enum(["month", "year"]).optional(), amount_cents: z.number().optional(),
   }), request_id: z.string(),
 });
@@ -39,7 +39,7 @@ export const pricingResultSchema = z.looseObject({
     product: z.literal("car-image"), updated_at: z.string(),
     currency: z.literal("usd"), credits_per_model: z.number(), free_signup_credits: z.number(),
     plans: z.array(z.looseObject({
-      id: z.enum(["free", "pro", "business", "enterprise"]), name: z.string(), price: money,
+      id: z.enum(["free", "starter", "pro", "business", "enterprise"]), name: z.string(), price: money,
       included: z.looseObject({ vehicle_images_per_month: z.number().nullable(), credits_per_month: z.number(), credits_once: z.number() }),
       limits: z.looseObject({ requests_per_minute_per_key: z.number(), requests_per_minute_per_account: z.number(), api_keys: z.number() }),
       features: z.array(z.string()), overage: z.string().nullable(), trial: z.null(),
@@ -60,7 +60,7 @@ const purchaseId = z.string().regex(/^[A-Za-z0-9_.:-]{8,255}$/).describe("Your i
 const maxAmount = z.number().int().min(0).describe("Your ceiling in cents, from get_pricing or the dry run. A higher price is refused (price_changed), never charged.");
 
 export const purchasePlanSchema = z.object({
-  plan: z.enum(["pro", "business"]),
+  plan: z.enum(["starter", "pro", "business"]),
   interval: z.enum(["month", "year"]).optional().describe("Defaults to month."),
   payment_token: paymentToken,
   max_amount: maxAmount,

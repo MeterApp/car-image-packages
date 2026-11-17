@@ -1206,7 +1206,7 @@ export class CarImageClient {
    * on a Stripe plan, which can immediately invoice a proration. Prefer
    * createCheckoutLink for a link-only flow with browser confirmation.
    */
-  async createPlanCheckout(plan: "pro" | "business", interval: PlanInterval = "month", options: RequestOptions = {}): Promise<PlanCheckoutResponse> {
+  async createPlanCheckout(plan: "starter" | "pro" | "business", interval: PlanInterval = "month", options: RequestOptions = {}): Promise<PlanCheckoutResponse> {
     if (plan !== "pro" && plan !== "business") throw new RangeError('plan must be "pro" or "business"');
     if (interval !== "month" && interval !== "year") throw new RangeError('interval must be "month" or "year"');
     const response = await this.send("/api/v1/billing/checkout", {
