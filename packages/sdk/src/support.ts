@@ -1,7 +1,7 @@
 /** A plan to link to; credits are no longer sold (2026-10-25). */
-export interface CheckoutLinkInput { plan: "pro" | "business"; interval?: "month" | "year" }
+export interface CheckoutLinkInput { plan: "starter" | "pro" | "business"; interval?: "month" | "year" }
 export interface BillingLinkResponse {
-  data: { url: string; /** Stripe Checkout session id, for checkoutStatus(); absent on links that sign the human in first. */ session_id?: string | null; kind: "checkout" | "portal" | "dashboard"; requires_confirmation: true; message: string; credits?: number; plan?: "pro" | "business"; interval?: "month" | "year"; amount_cents?: number };
+  data: { url: string; /** Stripe Checkout session id, for checkoutStatus(); absent on links that sign the human in first. */ session_id?: string | null; kind: "checkout" | "portal" | "dashboard"; requires_confirmation: true; message: string; credits?: number; plan?: "starter" | "pro" | "business"; interval?: "month" | "year"; amount_cents?: number };
   request_id: string;
 }
 export interface HelpResponse {
@@ -11,7 +11,7 @@ export interface HelpResponse {
 }
 /** One plan in the pricing document: the fleet-shared fields, then the older ones (`code`, `monthly_cents`…). */
 export interface PricingPlan {
-  id: "free" | "pro" | "business" | "enterprise";
+  id: "free" | "starter" | "pro" | "business" | "enterprise";
   name: string;
   /** Dollars; null for Enterprise (negotiated). */
   price: { monthly: number | null; yearly: number | null };
@@ -69,7 +69,7 @@ export interface PricingResponse {
 
 /** POST /api/v1/billing/purchase input (the SDK's spelling). */
 export interface PurchasePlanInput {
-  plan: "pro" | "business";
+  plan: "starter" | "pro" | "business";
   interval?: "month" | "year";
   /** A Stripe Shared Payment Token (spt_…); never a card number. */
   paymentToken: string;
@@ -98,7 +98,7 @@ export interface AgentPurchaseResponse {
     dry_run: boolean;
     replayed: boolean;
     purchase_id: string | null;
-    plan: "pro" | "business" | null;
+    plan: "starter" | "pro" | "business" | null;
     interval: "month" | "year" | null;
     charged: { amount: number; currency: string; card: string | null } | null;
     quote?: { amount: number; currency: string; card: string | null };

@@ -4,7 +4,7 @@ import { openBrowser } from "../browser.js";
 import type { CommandContext, CommandDefinition } from "../context.js";
 import { CliError } from "../errors.js";
 import { printJson } from "../output.js";
-export const PAID_PLANS = ["pro", "business"] as const;
+export const PAID_PLANS = ["starter", "pro", "business"] as const;
 
 /** Why `--credits` is refused: credits are not sold since 2026-10-25. */
 export const CREDITS_NOT_SOLD = "Credits are no longer sold.";

@@ -272,6 +272,7 @@ export const FREE_COURTESY_VEHICLE_IMAGES = 30;
  */
 export const PLAN_ALLOWANCES = {
   free: { monthlyUsd: 0, yearlyUsd: 0, vehicleImages: FREE_VEHICLE_IMAGES, period: "lifetime", courtesyImages: FREE_COURTESY_VEHICLE_IMAGES, creditsPerMonth: 0 },
+  starter: { monthlyUsd: 29, yearlyUsd: 290, vehicleImages: 100, period: "month", courtesyImages: 0, creditsPerMonth: 100 },
   pro: { monthlyUsd: 49, yearlyUsd: 490, vehicleImages: 2_500, period: "month", courtesyImages: 0, creditsPerMonth: 1_000 },
   business: { monthlyUsd: 99, yearlyUsd: 990, vehicleImages: 10_000, period: "month", courtesyImages: 0, creditsPerMonth: 4_000 },
 } as const;
@@ -718,7 +719,7 @@ export interface CreditPack {
   label?: string;
 }
 
-export type PlanCode = "free" | "pro" | "business" | "enterprise";
+export type PlanCode = "free" | "starter" | "pro" | "business" | "enterprise";
 /** `evaluation`: evaluation and personal projects (Free); `commercial`: commercial use inside your own products while subscribed, copies on your own servers and CDN included, deleted within 30 days after the plan ends; `commercial+export`: plus a bulk export or a catalog copy under a written agreement (Enterprise). */
 export type PlanLicense = "evaluation" | "commercial" | "commercial+export";
 export type PlanInterval = "month" | "year";
