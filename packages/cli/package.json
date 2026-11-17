@@ -22,7 +22,15 @@
     "claude",
     "cursor",
     "chatgpt",
-    "meter"
+    "meter",
+    "car-images",
+    "vehicle-images",
+    "car-api",
+    "car-image-api",
+    "automotive",
+    "transparent-png",
+    "vin",
+    "png"
   ],
   "type": "module",
   "bin": {

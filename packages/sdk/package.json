@@ -21,7 +21,15 @@
     "render",
     "mcp",
     "agents",
-    "meter"
+    "meter",
+    "car-images",
+    "vehicle-images",
+    "car-api",
+    "car-image-api",
+    "vehicle-image-api",
+    "automotive",
+    "transparent-png",
+    "vin"
   ],
   "type": "module",
   "sideEffects": false,
