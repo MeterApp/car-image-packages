@@ -40,7 +40,7 @@ import {
 import { IDEMPOTENCY_KEY_PATTERN, MAX_CHECK_VIEWS_VEHICLES } from "./types.js";
 
 describe("MCP tool definitions", () => {
-  it("exposes all 42 tools with agent-grade descriptions", () => {
+  it("exposes all 41 tools with agent-grade descriptions", () => {
     expect(Object.keys(MCP_TOOLS).sort()).toEqual(
       [
         "create_car_image_urls",
