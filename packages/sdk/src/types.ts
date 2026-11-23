@@ -232,8 +232,8 @@ export const MIN_YEAR = 1990;
  */
 export const CATALOG = {
   makes: 1_609,
-  models: 42_364,
-  modelYears: 197_331,
+  models: 42_365,
+  modelYears: 197_337,
   yearFrom: MIN_YEAR,
   yearTo: 2027,
 } as const;
