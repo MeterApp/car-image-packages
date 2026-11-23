@@ -4,6 +4,7 @@ import type {
   CreatedPackBatchResponse, PackBatchInput, PackBatchItemInput, PackBatchResponse, PackExportInput, PackExportResponse, PackImageOptions,
   PackImageResult, PackListResponse, PackManifestResponse, PackQuality, PackQuoteResponse, PackResponse, PackUnit,
 } from "./packs.js";
+import { IMAGE_REPORT_CATEGORIES, IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH, IMAGE_REPORT_REASON_MAX_LENGTH, IMAGE_REPORT_TYPES } from "./types.js";
 import { imageRequestBody, imageSearchParams, makeLogoSearchParams, isColor, normalizeMarket, normalizeYear, vehicleRequestBody } from "./params.js";
 import { RETRYABLE_STATUSES, backoffDelayMs, retryDelayMs } from "./retry.js";
 import {
@@ -40,8 +41,8 @@ import {
   type DecodeVinOptions,
   type DeviceCodeResponse,
   type DeviceTokenResult,
-  type FeedbackInput,
-  type FeedbackResponse,
+  type ImageReportInput,
+  type ImageReportResponse,
   type FetchLike,
   type HealthResponse,
   type ImageParams,
@@ -223,6 +224,53 @@ export interface LastFailure {
 }
 
 /** Validates and URL-encodes a request id for use in a path. */
+/** The JSON body of POST /api/v1/images/reports, checked the way the server reads it so a mistake fails before the call. */
+function imageReportBody(input: ImageReportInput): Record<string, unknown> {
+  if (!input || typeof input !== "object") throw new TypeError("reportImage requires an input object");
+  const body: Record<string, unknown> = {};
+  if (input.type !== undefined) {
+    if (!(IMAGE_REPORT_TYPES as readonly string[]).includes(input.type)) throw new TypeError(`type must be one of ${IMAGE_REPORT_TYPES.join(", ")}`);
+    body.type = input.type;
+  }
+  const reason = input.reason?.trim();
+  if (reason) {
+    if (reason.length > IMAGE_REPORT_REASON_MAX_LENGTH) throw new TypeError(`reason must be at most ${IMAGE_REPORT_REASON_MAX_LENGTH} characters`);
+    body.reason = reason;
+  }
+  const externalRef = input.externalRef?.trim();
+  if (externalRef) {
+    if (externalRef.length > IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH) throw new TypeError(`externalRef must be at most ${IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH} characters`);
+    body.external_ref = externalRef;
+  }
+  if (input.type === "missing_vehicle") {
+    const make = input.make?.trim();
+    const model = input.model?.trim();
+    if (!make || !model) throw new TypeError("a missing_vehicle report needs make and model");
+    body.make = make;
+    body.model = model;
+    body.year = normalizeYear(input.year);
+    return body;
+  }
+  if (input.category !== undefined) {
+    if (!(IMAGE_REPORT_CATEGORIES as readonly string[]).includes(input.category)) throw new TypeError(`category must be one of ${IMAGE_REPORT_CATEGORIES.join(", ")}`);
+    body.category = input.category;
+  }
+  if (input.assetId !== undefined) {
+    if (!input.assetId.trim()) throw new TypeError("assetId must not be empty");
+    body.asset_id = input.assetId.trim();
+  } else if (input.requestId !== undefined) {
+    if (!input.requestId.trim()) throw new TypeError("requestId must not be empty");
+    body.request_id = input.requestId.trim();
+  } else if ("vehicle" in input || "make" in input) {
+    Object.assign(body, vehicleRequestBody(input));
+    if (input.view) body.view = input.view;
+    if (input.color) body.color = String(input.color).trim();
+  } else {
+    throw new TypeError("reportImage requires assetId, requestId, a vehicle id, or make/model/year (or type missing_vehicle)");
+  }
+  return body;
+}
+
 function requestPath(id: string): string {
   if (typeof id !== "string" || !id.trim()) throw new TypeError("request id is required");
   return encodeURIComponent(id.trim());
@@ -778,31 +826,30 @@ export class CarImageClient {
 
   // ------------------------------------------------------------- feedback
 
-  /** POST /api/v1/feedback — free; rate a delivered image by request id or by vehicle (make, model and year, or a vehicle id). */
-  async feedback(input: FeedbackInput, options: RequestOptions = {}): Promise<FeedbackResponse> {
-    if (input.rating === undefined && input.verdict === undefined) {
-      throw new TypeError("feedback requires a rating (1-5) or a verdict (good|bad)");
-    }
-    const body: Record<string, unknown> = {};
-    if ("requestId" in input && input.requestId) {
-      body.request_id = input.requestId;
-    } else if ("make" in input || "vehicle" in input) {
-      Object.assign(body, imageRequestBody(input));
-      delete body.width;
-      delete body.height;
-      delete body.format;
-    } else {
-      throw new TypeError("feedback requires requestId, a vehicle id, or make/model/year");
-    }
-    if (input.rating !== undefined) body.rating = input.rating;
-    if (input.verdict !== undefined) body.verdict = input.verdict;
-    if (input.reason !== undefined) body.reason = input.reason;
-    const response = await this.send("/api/v1/feedback", {
+  /**
+   * POST /api/v1/images/reports — free; file a tracked report that starts the
+   * fix. `wrong_image` (category `identity`, `camera` or `paint`) and
+   * `poor_quality` name a stored image by `assetId`, by the `requestId` that
+   * delivered it, or by vehicle with `view` and `color`; `missing_vehicle`
+   * names `make`, `model` and `year` only. A repeat from the same account on
+   * the same image (or vehicle) folds into the open report: `created: false`
+   * and the same `id`. Keep `data.id`: webhooks carry it as `report_id` with
+   * your `externalRef`. `data.url` is the report's page, private to your account.
+   */
+  async reportImage(input: ImageReportInput, options: RequestOptions = {}): Promise<ImageReportResponse> {
+    const response = await this.send("/api/v1/images/reports", {
       ...options,
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify(imageReportBody(input)),
     });
-    return this.json<FeedbackResponse>(response);
+    return this.json<ImageReportResponse>(response);
+  }
+
+  /** GET /api/v1/images/reports/{id} — one of your image reports with its status now; another account's is a 404. */
+  async getImageReport(id: string, options: RequestOptions = {}): Promise<ImageReportResponse> {
+    if (typeof id !== "string" || !id.trim()) throw new TypeError("report id is required");
+    const response = await this.send(`/api/v1/images/reports/${encodeURIComponent(id.trim())}`, options);
+    return this.json<ImageReportResponse>(response);
   }
 
   // -------------------------------------------------------------- requests

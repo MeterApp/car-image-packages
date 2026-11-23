@@ -196,47 +196,6 @@ export const optionsCommand: CommandDefinition = {
   },
 };
 
-/** `car-image feedback --rating …`: image ratings, which `car-image feedback` still runs when given those flags. */
-export const rateImageCommand: CommandDefinition = {
-  name: "feedback",
-  summary: "Rate a delivered image (by request id or by vehicle) to improve renders",
-  usage:
-    "car-image feedback (--request-id <id> | --make <make> --model <model> --year <year> | --vehicle <veh_…>) [--view] [--color silver|<hex>]\n                   (--rating 1-5 | --good | --bad) [--reason <text>] [--json]",
-  async run(ctx: CommandContext): Promise<number> {
-    const { flags } = ctx.args;
-    if (!ctx.clientContext.apiKey) throw new CliError("Not signed in.", 1, "Run `car-image login` or set CAR_IMAGE_API_KEY.");
-    const rating = flagInteger(flags, "rating", { min: 1, max: 5 }) as 1 | 2 | 3 | 4 | 5 | undefined;
-    const verdict: "good" | "bad" | undefined = flags.good === true ? "good" : flags.bad === true ? "bad" : undefined;
-    if (flags.good === true && flags.bad === true) throw new CliError("Choose either --good or --bad", 2);
-    if (rating === undefined && verdict === undefined) throw new CliError("Provide --rating 1-5, --good or --bad", 2);
-    const reason = flagString(flags, "reason");
-    const requestId = flagString(flags, "request-id");
-    const base = { rating, verdict, reason };
-    const result = requestId
-      ? await ctx.clientContext.client.feedback({ requestId, ...base })
-      : await (async () => {
-          const vehicle = flagString(flags, "vehicle")?.trim();
-          const make = flagString(flags, "make");
-          const model = flagString(flags, "model");
-          const year = flagString(flags, "year");
-          if (!vehicle && (!make || !model || !year)) {
-            throw new CliError("Identify the image with --request-id, with --vehicle, or with --make, --model and --year", 2);
-          }
-          const view = flagView(flags);
-          const color = flagColor(flags);
-          const options = { view, color, ...base };
-          return vehicle
-            ? ctx.clientContext.client.feedback({ vehicle, ...options })
-            : ctx.clientContext.client.feedback({ make: make ?? "", model: model ?? "", year: year ?? "", ...options });
-        })();
-    if (ctx.io.json) {
-      printJson(ctx.io, result);
-      return 0;
-    }
-    ctx.io.stdout(`Thanks — feedback recorded (${verdict ?? `rating ${rating}`}${reason ? `: ${reason}` : ""}). request ${result.request_id}\n`);
-    return 0;
-  },
-};
 
 /** Search hits may arrive camelCase (catalog lib) or snake_case (REST); normalize for display. */
 export function searchHitView(hit: Record<string, unknown>): { kind: string; make: string; model: string | undefined; years: number[] | undefined; match: string; type: string } {

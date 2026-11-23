@@ -441,13 +441,46 @@ describe("CarImageClient", () => {
     await expect(pending).rejects.toThrow("stopped");
   });
 
-  it("sends feedback by request id or by vehicle", async () => {
-    const { instance, calls } = client([Response.json({ data: {}, request_id: "a" }, { status: 201 }), Response.json({ data: {}, request_id: "b" }, { status: 201 })]);
-    await instance.feedback({ requestId: "req_9", verdict: "good" });
-    await instance.feedback({ make: "Porsche", model: "911", year: 2024, view: "side", rating: 4, reason: "great" });
-    expect(calls[0]?.body).toEqual({ request_id: "req_9", verdict: "good" });
-    expect(calls[1]?.body).toEqual({ make: "Porsche", model: "911", year: 2024, view: "side", rating: 4, reason: "great" });
-    await expect(instance.feedback({ requestId: "x" })).rejects.toThrow(/rating|verdict/);
+  it("files an image report by image or by missing vehicle, and reads it back", async () => {
+    const report = {
+      object: "image_report", id: "0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10", url: "https://api.example.test/dashboard/image-reports/0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10",
+      type: "wrong_image", status: "reported", flagged: false, category: "identity", asset_id: null,
+      vehicle: { make: "Porsche", model: "911", year: 2024 }, report_count: 1, created_at: "2026-11-23T00:00:00Z",
+    };
+    const { instance, calls } = client([
+      Response.json({ data: report, created: true, request_id: "a" }, { status: 201 }),
+      Response.json({ data: report, created: false, request_id: "b" }),
+      Response.json({ data: { ...report, type: "missing_vehicle", category: null }, created: true, request_id: "c" }, { status: 201 }),
+      Response.json({ data: { ...report, type: "poor_quality", category: "quality" }, created: true, request_id: "d" }, { status: 201 }),
+      Response.json({ data: report, request_id: "e" }),
+    ]);
+    const filed = await instance.reportImage({ requestId: " req_01JD7X2Q ", category: "identity", reason: " Shows the previous generation ", externalRef: "meter-report-4812" });
+    expect(filed).toMatchObject({ created: true, data: { id: report.id, status: "reported" } });
+    expect(calls[0]?.url).toBe("https://api.example.test/api/v1/images/reports");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(calls[0]?.body).toEqual({ request_id: "req_01JD7X2Q", category: "identity", reason: "Shows the previous generation", external_ref: "meter-report-4812" });
+
+    expect((await instance.reportImage({ type: "wrong_image", vehicle: "veh_395yw8tn73ff8", view: "side", color: "red", category: "paint" })).created).toBe(false);
+    expect(calls[1]?.body).toEqual({ type: "wrong_image", category: "paint", vehicle: "veh_395yw8tn73ff8", view: "side", color: "red" });
+
+    await instance.reportImage({ type: "missing_vehicle", make: "Rivian", model: "R3", year: "2026", externalRef: "meter-report-4813" });
+    expect(calls[2]?.body).toEqual({ type: "missing_vehicle", make: "Rivian", model: "R3", year: 2026, external_ref: "meter-report-4813" });
+
+    await instance.reportImage({ type: "poor_quality", assetId: "6f1c2d4e-0000-4000-8000-000000000001" });
+    expect(calls[3]?.body).toEqual({ type: "poor_quality", asset_id: "6f1c2d4e-0000-4000-8000-000000000001" });
+
+    expect((await instance.getImageReport(report.id)).data.id).toBe(report.id);
+    expect(calls[4]?.url).toBe(`https://api.example.test/api/v1/images/reports/${report.id}`);
+    expect(calls[4]?.init.method ?? "GET").toBe("GET");
+
+    // Refused before a call: no target, a missing vehicle without a model, a reason or ref over the limit, an empty id.
+    await expect(instance.reportImage({ category: "identity" } as never)).rejects.toThrow(/assetId, requestId/);
+    await expect(instance.reportImage({ type: "missing_vehicle", make: "Rivian", model: " ", year: 2026 })).rejects.toThrow(/make and model/);
+    await expect(instance.reportImage({ requestId: "r", reason: "x".repeat(501) })).rejects.toThrow(/at most 500/);
+    await expect(instance.reportImage({ requestId: "r", externalRef: "x".repeat(101) })).rejects.toThrow(/at most 100/);
+    await expect(instance.reportImage({ requestId: "r", type: "bogus" as never })).rejects.toThrow(/type must be one of/);
+    await expect(instance.getImageReport(" ")).rejects.toThrow(/report id/);
+    expect(calls).toHaveLength(5);
   });
 
   it("lists and reads requests without a key, sending the key when present", async () => {

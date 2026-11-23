@@ -48,7 +48,7 @@ describe("agent-config", () => {
         expect(text).not.toMatch(/URL: \S*toolset/);
         expect(text).toContain("car-image mcp --toolset all");
         expect(text).toContain("Tools (core): resolve_vehicle, search_vehicles, decode_vin, check_vehicles, get_image_availability, get_car_image, create_car_image_urls, get_account, request_feature, report_issue, upvote_feedback, submit_review");
-        expect(text).toContain("The full hosted toolset includes list_feedback, get_feedback, list_my_feedback, remove_feedback_vote, comment_on_feedback, list_reviews, get_make_logo, create_3d_model, get_3d_model, publish_3d_model, list_image_options, describe_api, get_pricing, search_help, create_checkout_link, get_billing_link, purchase_plan, pay_invoice, checkout_status, list_members, list_webhooks.");
+        expect(text).toContain("The full hosted toolset includes report_image, list_feedback, get_feedback, list_my_feedback, remove_feedback_vote, comment_on_feedback, list_reviews, get_make_logo, create_3d_model, get_3d_model, publish_3d_model, list_image_options, describe_api, get_pricing, search_help, create_checkout_link, get_billing_link, purchase_plan, pay_invoice, checkout_status, list_members, list_webhooks.");
         // Served on `all`, out of the public reference: the config never advertises them.
         for (const tool of MCP_UNLISTED_TOOLS) expect(text).not.toContain(tool);
       }

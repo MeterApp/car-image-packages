@@ -442,7 +442,7 @@ describe("stdio MCP output schemas", () => {
     expect((model.data as { status: string }).status).toBe("ready");
   });
 
-  it("adds inline Markdown to signed URLs and passes the feedback receipt through unchanged", async () => {
+  it("adds inline Markdown to signed URLs", async () => {
     const urls = await callTool(
       [
         Response.json(
@@ -460,11 +460,37 @@ describe("stdio MCP output schemas", () => {
     expect(urls.data).toHaveLength(1);
     expect((urls.data as Array<{ markdown: string }>)[0]?.markdown).toContain("](<https://api.test/api/v1/delivery/token>)");
 
-    await callTool(
-      [Response.json({ data: { asset_id: "as_1", recorded: true, flagged: false }, request_id: "req_fb" }, { status: 201 })],
-      "rate_image",
-      { request_id: "req_img", verdict: "good" }
+  });
+
+  it("files report_image through the image-reports path and shows the private page", async () => {
+    const report = {
+      object: "image_report", id: "0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10", url: "https://api.test/dashboard/image-reports/0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10",
+      type: "wrong_image", status: "reported", flagged: false, category: "camera", asset_id: "6f1c2d4e-0000-4000-8000-000000000001",
+      vehicle: { make: "Porsche", model: "911", year: 2024 }, view: "side", color: "red", reason: null, external_ref: "t-1", report_count: 1, created_at: "2026-11-23T00:00:00Z",
+    };
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const { structured, summary } = await callToolWithSummary(
+      [Response.json({ data: report, created: true, request_id: "req_rep" }, { status: 201 })],
+      "report_image",
+      { request_id: "req_img", category: "camera", external_ref: "t-1" },
+      calls
     );
+    expect(calls[0]).toMatchObject({ url: "https://api.test/api/v1/images/reports", method: "POST", body: { request_id: "req_img", category: "camera", external_ref: "t-1" } });
+    expect(structured).toMatchObject({ data: { id: report.id }, created: true });
+    expect(summary).toContain(report.url);
+
+    const missing = { ...report, type: "missing_vehicle", category: null, asset_id: null, view: null, color: null, vehicle: { make: "Rivian", model: "R3", year: 2026 } };
+    const folded = await callToolWithSummary(
+      [Response.json({ data: missing, created: false, request_id: "req_rep2" })],
+      "report_image",
+      { type: "missing_vehicle", make: "Rivian", model: "R3", year: "2026" },
+      calls
+    );
+    expect(calls[0]?.body).toEqual({ type: "missing_vehicle", make: "Rivian", model: "R3", year: 2026 });
+    expect(folded.summary).toMatch(/^Added to the human's open report/);
+
+    expect((await callToolError([], "report_image", { category: "identity" })).text).toMatch(/Identify the image/);
+    expect((await callToolError([], "report_image", { type: "missing_vehicle", make: "Rivian" })).text).toMatch(/make, model and year/);
   });
 
   it("reads arguments a host sent as text before calling the API", async () => {

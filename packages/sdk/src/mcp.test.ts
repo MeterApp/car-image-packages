@@ -51,7 +51,7 @@ describe("MCP tool definitions", () => {
         "get_car_image",
       "get_make_logo",
         "list_image_options",
-        "rate_image",
+        "report_image",
         "resolve_vehicle",
         "search_vehicles",
         "decode_vin",
@@ -119,6 +119,30 @@ describe("MCP tool definitions", () => {
     expect(String(json.properties.framing?.description)).toMatch(/never with them/);
   });
 
+  it("reads report_image strictly, with one type per field", () => {
+    const schema = MCP_TOOL_SCHEMAS.report_image;
+    expect(schema.parse({ type: "missing_vehicle", make: "Rivian", model: "R3", year: "2026", external_ref: "meter-report-4813" })).toEqual({ type: "missing_vehicle", make: "Rivian", model: "R3", year: 2026, external_ref: "meter-report-4813" });
+    expect(schema.parse({ request_id: "req_01JD7X2Q", category: "camera", reason: "wrong angle" }).category).toBe("camera");
+    // A typo is refused, as the REST route refuses an unknown field, rather than dropped.
+    expect(() => schema.parse({ request_id: "req_1", catgory: "paint" })).toThrow();
+    expect(() => schema.parse({ type: "bogus" })).toThrow();
+    expect(() => schema.parse({ request_id: "req_1", reason: "x".repeat(501) })).toThrow();
+    expect(() => schema.parse({ request_id: "req_1", external_ref: "x".repeat(101) })).toThrow();
+    expect(() => schema.parse({ asset_id: "not-a-uuid" })).toThrow();
+    const json = z.toJSONSchema(schema, { io: "input" }) as { additionalProperties?: unknown; required?: string[]; properties: Record<string, Record<string, unknown>> };
+    expect(json.additionalProperties).toBe(false);
+    expect(json.required ?? []).toEqual([]);
+    expect(json.properties.type?.enum).toEqual(["wrong_image", "poor_quality", "missing_vehicle"]);
+    expect(json.properties.category?.enum).toEqual(["identity", "camera", "paint", "quality"]);
+    expect(MCP_TOOLS.report_image.description).toMatch(/^Free\./);
+    expect(MCP_TOOLS.report_image.description).toContain("report_issue");
+    expect(MCP_TOOL_OUTPUT_SCHEMAS.report_image.parse({
+      data: { object: "image_report", id: "r1", url: "https://carimage.dev/dashboard/image-reports/r1", type: "missing_vehicle", status: "reported", flagged: false, category: null, asset_id: null, vehicle: { make: "Rivian", model: "R3", year: 2026 }, report_count: 1, created_at: "2026-11-23T00:00:00Z", next_field: 1 },
+      created: true,
+      request_id: "req",
+    }).created).toBe(true);
+  });
+
   it("reads framing as one of its three values and nothing else", () => {
     const base = { make: "Porsche", model: "911", year: 2024 };
     expect(imageInputSchema.parse({ ...base, framing: "balanced" }).framing).toBe("balanced");
@@ -158,7 +182,6 @@ describe("MCP tool definitions", () => {
     expect(parsed).toMatchObject({ width: 960, height: 600, padding: 8, trim: true });
     expect(MCP_TOOL_SCHEMAS.search_vehicles.parse({ query: "porsche 911", year: "2024", limit: "5" })).toEqual({ query: "porsche 911", year: 2024, limit: 5 });
     expect(MCP_TOOL_SCHEMAS.create_car_image_urls.parse({ images: [{ vehicle: "veh_395yw8tn73ff8" }], ttl_seconds: "604800", max_uses: "0", renew_days: "30" })).toMatchObject({ ttl_seconds: 604800, max_uses: 0, renew_days: 30 });
-    expect(MCP_TOOL_SCHEMAS.rate_image.parse({ request_id: "req_1", rating: "4" }).rating).toBe(4);
     expect(MCP_TOOL_SCHEMAS.list_requests.parse({ limit: "10" }).limit).toBe(10);
     // The bounds hold (a size above 1024 is the server's to clamp), and text that is not a number is still refused.
     expect(imageInputSchema.parse({ vehicle: "veh_395yw8tn73ff8", width: "2000" }).width).toBe(2000);
@@ -284,7 +307,6 @@ describe("MCP tool definitions", () => {
     expect(MCP_TOOLS.create_3d_model.inputSchema.parse({ vehicle: "veh_395yw8tn73ff8", color: "1a2b3c" })).toMatchObject({ color: "1a2b3c" });
     expect(() => MCP_TOOLS.create_3d_model.inputSchema.parse({ make: "Toyota", model: "Camry" })).toThrow(/vehicle/);
     expect(() => MCP_TOOLS.create_3d_model.inputSchema.parse({ vehicle: "veh_395yw8tn73ff8", idempotency_key: "bad key!" })).toThrow();
-    expect(MCP_TOOLS.rate_image.inputSchema.parse({ vehicle: "veh_395yw8tn73ff8", color: "#1a2b3c", verdict: "good" })).toMatchObject({ vehicle: "veh_395yw8tn73ff8" });
     expect(MCP_TOOLS.decode_vin.inputSchema.parse({ vin: "1HGCM826*3A", year: "2003" })).toEqual({ vin: "1HGCM826*3A", year: 2003 });
   });
 
@@ -442,6 +464,7 @@ describe("MCP tool definitions", () => {
       expect(Object.keys(MCP_TOOLS)).toContain(name);
     }
     expect([...MCP_DOCUMENTED_EXTRAS]).toEqual([
+      "report_image",
       "list_feedback",
       "get_feedback",
       "list_my_feedback",

@@ -84,23 +84,62 @@ describe("car-image feedback", () => {
     expect(seen.map((call) => call.body)).toEqual([{ title: "Interior shots" }, { title: "Interior shots", force: true }]);
   });
 
-  it("lists, upvotes and removes a vote, and still rates an image with --rating", async () => {
+  it("lists, upvotes and removes a vote", async () => {
     const { fetchImpl, seen } = mockFetch([
       () => Response.json({ data: [RECORD], next_cursor: null, request_id: "a" }),
       () => Response.json({ data: { ...RECORD, votes: 5 }, request_id: "b" }),
       () => Response.json({ data: RECORD, request_id: "c" }),
-      () => Response.json({ data: { asset_id: "x", recorded: true, flagged: false }, request_id: "d" }, { status: 201 }),
     ]);
     expect(await run(["feedback", "mine"], fetchImpl)).toBe(0);
     expect(await run(["feedback", "upvote", RECORD.id], fetchImpl)).toBe(0);
     expect(await run(["feedback", "upvote", RECORD.id, "--remove"], fetchImpl)).toBe(0);
-    expect(await run(["feedback", "--request-id", "req_1", "--rating", "5"], fetchImpl)).toBe(0);
     expect(seen.map((call) => `${call.method} ${call.url}`)).toEqual([
       "GET https://api.test/api/v1/feedback?sort=recent_activity&mine=true",
       `POST https://api.test/api/v1/feedback/${RECORD.id}/votes`,
       `DELETE https://api.test/api/v1/feedback/${RECORD.id}/votes`,
-      "POST https://api.test/api/v1/feedback",
     ]);
+  });
+});
+
+describe("car-image feedback report-image", () => {
+  const REPORT = {
+    object: "image_report", id: "0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10", url: "https://api.test/dashboard/image-reports/0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10",
+    type: "wrong_image", status: "reported", flagged: false, category: "identity", asset_id: null,
+    vehicle: { make: "Porsche", model: "911", year: 2024 }, view: "side", color: "red", reason: "old generation", external_ref: "ticket-9", report_count: 1, created_at: "2026-11-23T00:00:00Z",
+  };
+
+  it("files an image report by request id, by vehicle or for a missing vehicle, and shows one", async () => {
+    const { fetchImpl, seen } = mockFetch([
+      () => Response.json({ data: REPORT, created: true, request_id: "a" }, { status: 201 }),
+      () => Response.json({ data: { ...REPORT, report_count: 2 }, created: false, request_id: "b" }),
+      () => Response.json({ data: { ...REPORT, type: "missing_vehicle", category: null, view: null, color: null }, created: true, request_id: "c" }, { status: 201 }),
+      () => Response.json({ data: REPORT, request_id: "d" }),
+    ]);
+    expect(await run(["feedback", "report-image", "--request-id", "req_01JD7X2Q", "--category", "identity", "--reason", "old generation", "--ref", "ticket-9"], fetchImpl)).toBe(0);
+    expect(out.join("")).toContain("Reported (reported)");
+    expect(out.join("")).toContain(REPORT.url);
+    expect(await run(["feedback", "report-image", "--vehicle", "veh_395yw8tn73ff8", "--view", "side", "--color", "red", "--type", "wrong_image", "--category", "paint"], fetchImpl)).toBe(0);
+    expect(out.join("")).toContain("Added to your open report (reported, 2 reports)");
+    expect(await run(["feedback", "report-image", "--type", "missing_vehicle", "--make", "Rivian", "--model", "R3", "--year", "2026"], fetchImpl)).toBe(0);
+    expect(await run(["feedback", "report-image", "show", REPORT.id], fetchImpl)).toBe(0);
+    expect(seen.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST https://api.test/api/v1/images/reports",
+      "POST https://api.test/api/v1/images/reports",
+      "POST https://api.test/api/v1/images/reports",
+      `GET https://api.test/api/v1/images/reports/${REPORT.id}`,
+    ]);
+    expect(seen[0]?.body).toEqual({ request_id: "req_01JD7X2Q", category: "identity", reason: "old generation", external_ref: "ticket-9" });
+    expect(seen[1]?.body).toEqual({ type: "wrong_image", category: "paint", vehicle: "veh_395yw8tn73ff8", view: "side", color: "red" });
+    expect(seen[2]?.body).toEqual({ type: "missing_vehicle", make: "Rivian", model: "R3", year: 2026 });
+  });
+
+  it("refuses a report that names nothing before calling the API", async () => {
+    const { fetchImpl, seen } = mockFetch([]);
+    expect(await run(["feedback", "report-image", "--category", "identity"], fetchImpl)).toBe(2);
+    expect(err.join("")).toContain("--request-id");
+    expect(await run(["feedback", "report-image", "--type", "missing_vehicle", "--make", "Rivian"], fetchImpl)).toBe(2);
+    expect(await run(["feedback", "report-image", "show"], fetchImpl)).toBe(2);
+    expect(seen).toHaveLength(0);
   });
 });
 
