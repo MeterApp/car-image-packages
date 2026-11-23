@@ -40,7 +40,7 @@ import {
 import { IDEMPOTENCY_KEY_PATTERN, MAX_CHECK_VIEWS_VEHICLES } from "./types.js";
 
 describe("MCP tool definitions", () => {
-  it("exposes all 41 tools with agent-grade descriptions", () => {
+  it("exposes all 42 tools with agent-grade descriptions", () => {
     expect(Object.keys(MCP_TOOLS).sort()).toEqual(
       [
         "create_car_image_urls",
@@ -52,6 +52,7 @@ describe("MCP tool definitions", () => {
       "get_make_logo",
         "list_image_options",
         "rate_image",
+        "report_image",
         "resolve_vehicle",
         "search_vehicles",
         "decode_vin",
@@ -117,6 +118,30 @@ describe("MCP tool definitions", () => {
     expect(json.properties.framing?.default).toBeUndefined();
     expect(json.required ?? []).not.toContain("framing");
     expect(String(json.properties.framing?.description)).toMatch(/never with them/);
+  });
+
+  it("reads report_image strictly, with one type per field", () => {
+    const schema = MCP_TOOL_SCHEMAS.report_image;
+    expect(schema.parse({ type: "missing_vehicle", make: "Rivian", model: "R3", year: "2026", external_ref: "meter-report-4813" })).toEqual({ type: "missing_vehicle", make: "Rivian", model: "R3", year: 2026, external_ref: "meter-report-4813" });
+    expect(schema.parse({ request_id: "req_01JD7X2Q", category: "camera", reason: "wrong angle" }).category).toBe("camera");
+    // A typo is refused, as the REST route refuses an unknown field, rather than dropped.
+    expect(() => schema.parse({ request_id: "req_1", catgory: "paint" })).toThrow();
+    expect(() => schema.parse({ type: "bogus" })).toThrow();
+    expect(() => schema.parse({ request_id: "req_1", reason: "x".repeat(501) })).toThrow();
+    expect(() => schema.parse({ request_id: "req_1", external_ref: "x".repeat(101) })).toThrow();
+    expect(() => schema.parse({ asset_id: "not-a-uuid" })).toThrow();
+    const json = z.toJSONSchema(schema, { io: "input" }) as { additionalProperties?: unknown; required?: string[]; properties: Record<string, Record<string, unknown>> };
+    expect(json.additionalProperties).toBe(false);
+    expect(json.required ?? []).toEqual([]);
+    expect(json.properties.type?.enum).toEqual(["wrong_image", "poor_quality", "missing_vehicle"]);
+    expect(json.properties.category?.enum).toEqual(["identity", "camera", "paint", "quality"]);
+    expect(MCP_TOOLS.report_image.description).toMatch(/^Free\./);
+    expect(MCP_TOOLS.report_image.description).toContain("report_issue");
+    expect(MCP_TOOL_OUTPUT_SCHEMAS.report_image.parse({
+      data: { object: "image_report", id: "r1", url: "https://carimage.dev/dashboard/image-reports/r1", type: "missing_vehicle", status: "reported", flagged: false, category: null, asset_id: null, vehicle: { make: "Rivian", model: "R3", year: 2026 }, report_count: 1, created_at: "2026-11-23T00:00:00Z", next_field: 1 },
+      created: true,
+      request_id: "req",
+    }).created).toBe(true);
   });
 
   it("reads framing as one of its three values and nothing else", () => {
@@ -442,6 +467,7 @@ describe("MCP tool definitions", () => {
       expect(Object.keys(MCP_TOOLS)).toContain(name);
     }
     expect([...MCP_DOCUMENTED_EXTRAS]).toEqual([
+      "report_image",
       "list_feedback",
       "get_feedback",
       "list_my_feedback",

@@ -1,5 +1,17 @@
 import { readFile } from "node:fs/promises";
-import { REQUEST_KINDS, REQUEST_SORTS, REQUEST_STATUSES, type FiledFeedbackResponse, type IssueContext, type OwnReview, type RequestRecord } from "@meterapp/car-image-sdk";
+import {
+  IMAGE_REPORT_CATEGORIES,
+  IMAGE_REPORT_TYPES,
+  REQUEST_KINDS,
+  REQUEST_SORTS,
+  REQUEST_STATUSES,
+  type FiledFeedbackResponse,
+  type ImageReportInput,
+  type ImageReportResponse,
+  type IssueContext,
+  type OwnReview,
+  type RequestRecord,
+} from "@meterapp/car-image-sdk";
 import { flagBoolean, flagChoice, flagInteger, flagString } from "../args.js";
 import { lastErrorPath } from "../config.js";
 import type { CommandContext, CommandDefinition } from "../context.js";
@@ -7,6 +19,7 @@ import { CliError } from "../errors.js";
 import { keyValues, paint, printJson, table } from "../output.js";
 import { CLI_VERSION } from "../version.js";
 import { rateImageCommand } from "./catalog.js";
+import { flagColor, flagView } from "./images.js";
 import { requestLabel, requestPageLink, SIGN_IN_HINT, votesLabel } from "./request.js";
 
 /**
@@ -14,13 +27,16 @@ import { requestLabel, requestPageLink, SIGN_IN_HINT, votesLabel } from "./reque
  * the same actions as the REST API and the MCP tools. `car-image feedback`
  * with --rating/--good/--bad still rates a delivered image, as before.
  */
-const SUBCOMMANDS = ["list", "show", "mine", "request", "report", "upvote", "comment"] as const;
+const SUBCOMMANDS = ["list", "show", "mine", "request", "report", "report-image", "upvote", "comment"] as const;
 const USAGE = [
   "car-image feedback list [--kind feature|issue|vehicle] [--status open|planned|in_progress|done|declined|duplicate] [--sort top|new|recent_activity] [--q <text>] [--limit 25] [--json]",
   "car-image feedback show <id>",
   "car-image feedback mine",
   'car-image feedback request "<title>" [--details "..."] [--force]',
   'car-image feedback report "<what went wrong>" [--details "..."] [--request-id <id> | --last] [--force]',
+  'car-image feedback report-image (--request-id <id> | --asset-id <id> | --vehicle <veh_…> | --make … --model … --year …) [--view …] [--color …] [--type wrong_image|poor_quality] [--category identity|camera|paint|quality] [--reason "..."] [--ref <your id>]',
+  "car-image feedback report-image --type missing_vehicle --make … --model … --year … [--reason \"...\"] [--ref <your id>]",
+  "car-image feedback report-image show <report id>",
   "car-image feedback upvote <id> [--remove]",
   'car-image feedback comment <id> "<text>"',
   "car-image feedback (--request-id <id> | --vehicle <veh_…> | --make … --model … --year …) (--rating 1-5 | --good | --bad)   rate an image",
@@ -165,6 +181,68 @@ async function report(ctx: CommandContext): Promise<number> {
   return printFiled(ctx, result, "issue");
 }
 
+function printImageReport(ctx: CommandContext, result: ImageReportResponse, filed: boolean): number {
+  if (ctx.io.json) {
+    printJson(ctx.io, result);
+    return 0;
+  }
+  const report = result.data;
+  if (filed) {
+    ctx.io.stdout(`${result.created === false ? "Added to your open report" : "Reported"} (${report.status}${report.report_count > 1 ? `, ${report.report_count} reports` : ""}).\n`);
+  }
+  const vehicle = `${report.vehicle.year} ${report.vehicle.make} ${report.vehicle.model}`;
+  const rows: Array<[string, string]> = [
+    ["type", report.type + (report.category ? ` (${report.category})` : "")],
+    ["status", report.status],
+    ["vehicle", vehicle + (report.view ? `, ${report.view}` : "") + (report.color ? `, ${report.color}` : "")],
+    ["id", report.id],
+    ["url", report.url],
+  ];
+  if (report.external_ref) rows.push(["your ref", report.external_ref]);
+  if (report.resolved_at) rows.push(["resolved", `${report.resolved_at}${report.resolution ? ` (${report.resolution})` : ""}`]);
+  ctx.io.stdout(`${keyValues(ctx.io, rows)}\n`);
+  if (filed) ctx.io.stdout(`${paint(ctx.io, "dim", "The page is private to your account. Check it later: car-image feedback report-image show <id>")}\n`);
+  return 0;
+}
+
+async function reportImage(ctx: CommandContext): Promise<number> {
+  requireSignIn(ctx);
+  const { flags } = ctx.args;
+  if (ctx.args.positionals[1]?.toLowerCase() === "show") {
+    const id = ctx.args.positionals[2]?.trim();
+    if (!id) throw new CliError("Missing report id", 2, "Example: car-image feedback report-image show <id> — the id is printed when the report is filed.");
+    return printImageReport(ctx, await ctx.clientContext.client.getImageReport(id), false);
+  }
+  const type = flagChoice(flags, "type", IMAGE_REPORT_TYPES);
+  const category = flagChoice(flags, "category", IMAGE_REPORT_CATEGORIES);
+  const common = { reason: flagString(flags, "reason"), externalRef: flagString(flags, "ref") };
+  const make = flagString(flags, "make");
+  const model = flagString(flags, "model");
+  const year = flagString(flags, "year");
+  let input: ImageReportInput;
+  if (type === "missing_vehicle") {
+    if (!make || !model || !year) throw new CliError("A missing vehicle needs --make, --model and --year", 2, "Example: car-image feedback report-image --type missing_vehicle --make Rivian --model R3 --year 2026");
+    input = { type, make, model, year, ...common };
+  } else {
+    const image = { type, category, ...common };
+    const requestId = flagString(flags, "request-id");
+    const assetId = flagString(flags, "asset-id");
+    const vehicle = flagString(flags, "vehicle")?.trim();
+    if (assetId) input = { ...image, assetId };
+    else if (requestId) input = { ...image, requestId };
+    else if (vehicle) input = { ...image, vehicle, view: flagView(flags), color: flagColor(flags) };
+    else if (make && model && year) input = { ...image, make, model, year, view: flagView(flags), color: flagColor(flags) };
+    else {
+      throw new CliError(
+        "Identify the image with --request-id, --asset-id, --vehicle, or --make, --model and --year",
+        2,
+        'Example: car-image feedback report-image --request-id req_01JD7X2Q --category identity --reason "Shows the previous generation". For a vehicle the catalog lacks: --type missing_vehicle.'
+      );
+    }
+  }
+  return printImageReport(ctx, await ctx.clientContext.client.reportImage(input), true);
+}
+
 async function upvote(ctx: CommandContext): Promise<number> {
   requireSignIn(ctx);
   const id = requireId(ctx, "upvote");
@@ -194,7 +272,7 @@ async function comment(ctx: CommandContext): Promise<number> {
 
 export const feedbackCommand: CommandDefinition = {
   name: "feedback",
-  summary: "Request features, report issues with the request attached, upvote and comment (free); --rating rates an image",
+  summary: "Request features, report issues with the request attached, report a wrong image or a missing vehicle, upvote and comment (free); --rating rates an image",
   usage: USAGE,
   async run(ctx: CommandContext): Promise<number> {
     const { flags } = ctx.args;
@@ -211,6 +289,8 @@ export const feedbackCommand: CommandDefinition = {
         return request(ctx);
       case "report":
         return report(ctx);
+      case "report-image":
+        return reportImage(ctx);
       case "upvote":
         return upvote(ctx);
       case "comment":

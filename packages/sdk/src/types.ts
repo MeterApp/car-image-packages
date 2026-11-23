@@ -1143,7 +1143,112 @@ export type FeedbackInput = FeedbackTarget & {
 };
 
 export interface FeedbackResponse {
-  data: Record<string, unknown>;
+  data: {
+    asset_id?: string | null;
+    recorded?: boolean;
+    flagged?: boolean;
+    /**
+     * A negative rating files an image report ({@link CarImageClient.reportImage}):
+     * its id, its private page, its status and whether it is new. Null for a
+     * positive rating; absent from servers that predate image reports.
+     */
+    id?: string | null;
+    url?: string | null;
+    status?: ImageReportStatus | null;
+    created?: boolean | null;
+    report?: ImageReport | null;
+    [key: string]: unknown;
+  };
+  request_id: string;
+}
+
+// ------------------------------------------------------------ image reports
+
+/** What an image report is about: the wrong car, angle or paint; a poor render; or a vehicle the catalog lacks. */
+export const IMAGE_REPORT_TYPES = ["wrong_image", "poor_quality", "missing_vehicle"] as const;
+export type ImageReportType = (typeof IMAGE_REPORT_TYPES)[number];
+
+/** `identity`, `camera` and `paint` are a `wrong_image`'s (default `identity`); `quality` is a `poor_quality`'s. A missing vehicle has none. */
+export const IMAGE_REPORT_CATEGORIES = ["identity", "camera", "paint", "quality"] as const;
+export type ImageReportCategory = (typeof IMAGE_REPORT_CATEGORIES)[number];
+
+/**
+ * `reported`: recorded, the image keeps serving. `flagged`: enough accounts
+ * reported the image and it is out of service while it is fixed (image
+ * reports only). `repaired`: a fix is serving (a missing vehicle joined the
+ * catalog). `closed`: the team closed it without a repair.
+ */
+export const IMAGE_REPORT_STATUSES = ["reported", "flagged", "repaired", "closed"] as const;
+export type ImageReportStatus = (typeof IMAGE_REPORT_STATUSES)[number];
+
+/** Longest `reason` and `external_ref` the server takes. */
+export const IMAGE_REPORT_REASON_MAX_LENGTH = 500;
+export const IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH = 100;
+
+interface ImageReportCommon {
+  /** What was wrong, in the reporter's words (at most 500 characters). No personal data. */
+  reason?: string;
+  /** Your own id for the report, such as the ticket in your app (at most 100 characters); returned on the report and in its webhooks. */
+  externalRef?: string;
+}
+
+/** The stored image a report is about: by asset id, by the request id that delivered it, or by vehicle with view and color. */
+export type ImageReportTarget =
+  | { assetId: string; requestId?: undefined }
+  | { requestId: string; assetId?: undefined }
+  | (VehicleSelector & { view?: View; color?: Color; assetId?: undefined; requestId?: undefined });
+
+/** A wrong or poor image. `type` defaults to `poor_quality` for category `quality`, else `wrong_image`. */
+export type ImageReportImageInput = ImageReportCommon &
+  ImageReportTarget & {
+    type?: "wrong_image" | "poor_quality";
+    category?: ImageReportCategory;
+  };
+
+/** A vehicle the catalog does not carry: make, model and year only, as the human typed them. */
+export interface ImageReportMissingVehicleInput extends ImageReportCommon {
+  type: "missing_vehicle";
+  make: string;
+  model: string;
+  year: Year;
+}
+
+/** `POST /api/v1/images/reports`. */
+export type ImageReportInput = ImageReportImageInput | ImageReportMissingVehicleInput;
+
+/** A tracked image report. `url` is its page, private to the reporting account and the Car Image team. */
+export interface ImageReport {
+  object: "image_report";
+  id: string;
+  url: string;
+  type: ImageReportType;
+  status: ImageReportStatus;
+  /** `status` is `flagged`. */
+  flagged: boolean;
+  category: ImageReportCategory | null;
+  /** Null for a missing vehicle. */
+  asset_id: string | null;
+  vehicle: { make: string; model: string; year: number };
+  view?: string | null;
+  color?: string | null;
+  reason?: string | null;
+  external_ref?: string | null;
+  /** Reports this account folded into this one. */
+  report_count: number;
+  created_at: string;
+  last_reported_at?: string;
+  resolved_at?: string | null;
+  resolution?: "repaired" | "closed" | null;
+}
+
+/**
+ * `POST /api/v1/images/reports` (201 `created: true` for a new report, 200
+ * `created: false` when it folded into the account's open one) and
+ * `GET /api/v1/images/reports/{id}`.
+ */
+export interface ImageReportResponse {
+  data: ImageReport;
+  created?: boolean;
   request_id: string;
 }
 

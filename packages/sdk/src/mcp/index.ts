@@ -45,6 +45,11 @@ import {
   MARKET_PATTERN,
   VEHICLE_ID_PATTERN,
   VIEWS,
+  IMAGE_REPORT_CATEGORIES,
+  IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH,
+  IMAGE_REPORT_REASON_MAX_LENGTH,
+  IMAGE_REPORT_STATUSES,
+  IMAGE_REPORT_TYPES,
   type Format,
   type RequestFormat,
 } from "../types.js";
@@ -128,6 +133,7 @@ export const MCP_TOOLSETS = {
     "report_issue",
     "upvote_feedback",
     "submit_review",
+    "report_image",
     "list_feedback",
     "get_feedback",
     "list_my_feedback",
@@ -513,6 +519,39 @@ export const MCP_TOOL_SCHEMAS = {
     rating: z.coerce.number().int().min(1).max(5).optional().describe("1 (unusable) to 5 (perfect)."),
     verdict: z.enum(["good", "bad"]).optional().describe("Quick thumbs up/down; provide this or rating."),
     reason: z.string().max(500).optional().describe("What was wrong or right, e.g. 'wrong body style', 'perfect angle'."),
+  }),
+  report_image: z.strictObject({
+    type: z
+      .enum(IMAGE_REPORT_TYPES)
+      .optional()
+      .describe("wrong_image: the wrong car, angle or paint. poor_quality: the right car, badly drawn. missing_vehicle: the catalog lacks the vehicle (make, model and year only, no image). Default: poor_quality for category quality, else wrong_image."),
+    category: z
+      .enum(IMAGE_REPORT_CATEGORIES)
+      .optional()
+      .describe("What is wrong with the image: identity (the wrong vehicle or generation, the default), camera (the wrong angle) or paint for wrong_image; quality for poor_quality. Omit for missing_vehicle."),
+    asset_id: z.string().uuid().optional().describe("The image asset id, when a response returned one."),
+    request_id: z
+      .string()
+      .min(1)
+      .max(128)
+      .optional()
+      .describe("The request_id returned with the image by get_car_image or create_car_image_urls. With asset_id, the preferred way to name the image."),
+    vehicle: vehicleIdSchema.optional(),
+    make: z.string().min(1).max(80).optional().describe("Otherwise name the image by vehicle (a vehicle id, or make, model and year, with view and color). For missing_vehicle: the make as the human gave it."),
+    model: z.string().min(1).max(80).optional().describe("With make: the model. For missing_vehicle, as the human gave it."),
+    year: z.coerce.number().int().min(1900).max(2100).optional().describe("With make and model: the model year. Required for missing_vehicle."),
+    view: z.enum(VIEWS).optional().describe("With a vehicle: the view of the image."),
+    color: colorSchema.optional(),
+    reason: z
+      .string()
+      .max(IMAGE_REPORT_REASON_MAX_LENGTH)
+      .optional()
+      .describe("What is wrong, in a line, e.g. 'shows the previous generation'. No personal data."),
+    external_ref: z
+      .string()
+      .max(IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH)
+      .optional()
+      .describe("The human's own id for the report, such as a ticket in their app; returned on the report and in its webhooks. No personal data."),
   }),
   get_pricing: z.object({}),
   search_help: helpQuerySchema,
@@ -1317,6 +1356,26 @@ export const MCP_TOOL_OUTPUT_SCHEMAS = {
     }),
     request_id: z.string(),
   }),
+  report_image: z.looseObject({
+    data: z.looseObject({
+      object: z.literal("image_report"),
+      id: z.string(),
+      /** The report's page, private to the reporting account and the Car Image team. */
+      url: z.string(),
+      type: z.enum(IMAGE_REPORT_TYPES),
+      status: z.enum(IMAGE_REPORT_STATUSES),
+      flagged: z.boolean(),
+      category: z.enum(IMAGE_REPORT_CATEGORIES).nullable(),
+      asset_id: z.string().nullable(),
+      vehicle: z.looseObject({ make: z.string(), model: z.string(), year: z.number() }),
+      external_ref: z.string().nullable().optional(),
+      report_count: z.number(),
+      created_at: z.string(),
+    }),
+    /** False when the report folded into the account's open one on the same image (or vehicle). */
+    created: z.boolean().optional(),
+    request_id: z.string(),
+  }),
   decode_vin: z.looseObject({ data: vinResultSchema, request_id: z.string() }),
   create_3d_model: z.looseObject({
     data: model3dSchema,
@@ -1986,6 +2045,15 @@ export const MCP_TOOLS: { [N in McpToolName]: McpToolDefinition<N> } = {
     outputSchema: MCP_TOOL_OUTPUT_SCHEMAS.report_issue,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
+  report_image: {
+    name: "report_image",
+    title: "Report an image or a missing vehicle",
+    description:
+      "Free. Use it when the human says a picture is the wrong car, generation, angle or paint (type wrong_image), is poorly drawn (poor_quality), or that a vehicle is missing from the catalog (missing_vehicle: make, model and year only). Name the image by request_id or asset_id when you have one, else by vehicle with view and color. One call files a tracked report and starts the fix: reports from enough accounts take the image out of service while it is redrawn; a missing vehicle joins the catalog request. A repeat on the same image folds into the open report (created: false, same id). Show the human the report's url, a page private to their account, and keep its id. No personal data in reason or external_ref. Not for API errors: that is report_issue.",
+    inputSchema: MCP_TOOL_SCHEMAS.report_image,
+    outputSchema: MCP_TOOL_OUTPUT_SCHEMAS.report_image,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
   list_feedback: {
     name: "list_feedback",
     title: "List the feedback board",
@@ -2210,6 +2278,36 @@ export const API_REFERENCE: ApiEndpointReference[] = [
     returns: "{data:{params:{vehicle_id,make,model,year,view,color}, display:{make_name,model_name}, candidates:[...], confidence:high|medium|low, image_path, appearance:{market,scope}}}",
     sdk: "client.resolve(query, { market })",
     cli: "car-image resolve red 2024 porsche 911 side view [--market AU]",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/images/reports",
+    summary: "Report a wrong image (the wrong car, generation, angle or paint), a poor image, or a vehicle the catalog lacks. One tracked report that starts the fix: open reports from 2 accounts take an image out of service while it is redrawn; a missing vehicle joins the catalog request. A repeat from the same account on the same image (or vehicle) folds into the open report.",
+    auth: "bearer",
+    credits: "free (5,000 reports a day per account)",
+    params: [
+      "type (wrong_image|poor_quality|missing_vehicle; default poor_quality for category quality, else wrong_image)",
+      "category (identity|camera|paint for wrong_image, default identity; quality for poor_quality)",
+      "an image: asset_id | request_id (the X-Request-Id that delivered it) | vehicle or make+model+year with view?, color?",
+      "missing_vehicle: make, model, year only",
+      "reason? (≤500), external_ref? (≤100, your own id; returned in webhooks)",
+    ],
+    returns: "201 {data:{object:'image_report', id, url, type, status (reported|flagged|repaired|closed), flagged, category, asset_id, vehicle:{make,model,year}, view, color, reason, external_ref, report_count, created_at}, created:true, request_id}; 200 with created:false when folded",
+    errors: ["400 invalid_body (unknown field, missing target)", "401", "404 (no such image or vehicle id)", "429 (daily report limit)"],
+    notes: "Prefer request_id or asset_id. url is the report's page, private to the account. image.issue_reported / image.issue_resolved (and vehicle.available) webhooks carry report_id and external_ref to the reporting account only.",
+    sdk: "client.reportImage({ requestId, category: 'identity', reason }) / client.reportImage({ type: 'missing_vehicle', make, model, year })",
+    cli: "car-image feedback report-image --request-id <id> --category identity | car-image feedback report-image --type missing_vehicle --make … --model … --year …",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/images/reports/{id}",
+    summary: "One of your image reports with its status now; another account's is a 404.",
+    auth: "bearer",
+    credits: "free",
+    returns: "200 {data:{object:'image_report', …}, request_id}",
+    errors: ["401", "404"],
+    sdk: "client.getImageReport(id)",
+    cli: "car-image feedback report-image show <id>",
   },
   {
     method: "GET",

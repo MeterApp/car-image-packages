@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { CREDITS_PER_DOLLAR, colorParam, isCarImageError, isHexColor, type CarImageClient, type FiledFeedbackResponse, type ImageParams, type VehicleSelector } from "@meterapp/car-image-sdk";
+import { CREDITS_PER_DOLLAR, colorParam, isCarImageError, isHexColor, type CarImageClient, type FiledFeedbackResponse, type ImageParams, type ImageReportInput, type VehicleSelector } from "@meterapp/car-image-sdk";
 import {
   DEFAULT_MCP_TOOLSET,
   MCP_SERVER_INFO,
@@ -435,6 +435,32 @@ export function buildStdioMcpServer(client: CarImageClient, toolset: McpToolset 
       return errorToolResult("Identify the image with request_id, with a vehicle id, or with make, model and year.");
     }
     return jsonToolResult({ ...result }, "Feedback recorded. Thank you.");
+  });
+
+  register("report_image", async (input) => {
+    const common = { reason: input.reason, externalRef: input.external_ref };
+    const image = { type: input.type as "wrong_image" | "poor_quality" | undefined, category: input.category, ...common };
+    let report: ImageReportInput;
+    if (input.type === "missing_vehicle") {
+      if (!input.make || !input.model || input.year === undefined) return errorToolResult("A missing_vehicle report needs make, model and year (and no image).");
+      report = { type: "missing_vehicle", make: input.make, model: input.model, year: input.year, ...common };
+    } else if (input.asset_id) {
+      report = { ...image, assetId: input.asset_id };
+    } else if (input.request_id) {
+      report = { ...image, requestId: input.request_id };
+    } else if (input.vehicle) {
+      report = { ...image, vehicle: input.vehicle, view: input.view, color: input.color };
+    } else if (input.make && input.model && input.year !== undefined) {
+      report = { ...image, make: input.make, model: input.model, year: input.year, view: input.view, color: input.color };
+    } else {
+      return errorToolResult("Identify the image with request_id, asset_id, a vehicle id, or make, model and year; or send type missing_vehicle with make, model and year.");
+    }
+    const result = await client.reportImage(report);
+    const filed = result.data;
+    return jsonToolResult(
+      { ...result },
+      `${result.created === false ? "Added to the human's open report" : "Report filed"} (${filed.status}). Show the human its page, private to their account: ${filed.url}`
+    );
   });
 
   register("create_3d_model", async (input) => {
