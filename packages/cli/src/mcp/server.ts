@@ -419,24 +419,6 @@ export function buildStdioMcpServer(client: CarImageClient, toolset: McpToolset 
     return jsonToolResult({ ...result }, webhooksSummary(result));
   });
 
-  register("rate_image", async (input) => {
-    const feedback = { rating: input.rating as 1 | 2 | 3 | 4 | 5 | undefined, verdict: input.verdict, reason: input.reason };
-    if (input.rating === undefined && input.verdict === undefined) {
-      return errorToolResult("Provide verdict (good|bad) or rating (1-5).");
-    }
-    let result;
-    if (input.request_id) {
-      result = await client.feedback({ requestId: input.request_id, ...feedback });
-    } else if (input.vehicle) {
-      result = await client.feedback({ vehicle: input.vehicle, view: input.view, color: input.color, ...feedback });
-    } else if (input.make && input.model && input.year !== undefined) {
-      result = await client.feedback({ make: input.make, model: input.model, year: input.year, view: input.view, color: input.color, ...feedback });
-    } else {
-      return errorToolResult("Identify the image with request_id, with a vehicle id, or with make, model and year.");
-    }
-    return jsonToolResult({ ...result }, "Feedback recorded. Thank you.");
-  });
-
   register("report_image", async (input) => {
     const common = { reason: input.reason, externalRef: input.external_ref };
     const image = { type: input.type as "wrong_image" | "poor_quality" | undefined, category: input.category, ...common };

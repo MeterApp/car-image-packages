@@ -162,7 +162,7 @@ describe("car-image get and url with vehicle ids and hex paint", () => {
     expect(err.join("")).toContain('Invalid --color "navyish"');
     err = [];
     expect(await run(["feedback", "--good"])).toBe(2);
-    expect(err.join("")).toContain("--vehicle");
+    expect(err.join("")).toContain("report-image");
   });
 
   it("refuses --max-uses above 1000, the most POST /api/v1/image-urls accepts, before any request", async () => {
@@ -175,11 +175,6 @@ describe("car-image get and url with vehicle ids and hex paint", () => {
     expect(seen[0]?.body).toMatchObject({ max_uses: 1000 });
   });
 
-  it("rates an image by vehicle id", async () => {
-    const { fetchImpl, seen } = mockFetch([() => Response.json({ data: { flagged: false }, request_id: "req_fb" }, { status: 201 })]);
-    expect(await run(["feedback", "--vehicle", "veh_395yw8tn73ff8", "--color", "#1a2b3c", "--good"], fetchImpl)).toBe(0);
-    expect(seen[0]?.body).toEqual({ vehicle: "veh_395yw8tn73ff8", color: "#1a2b3c", verdict: "good" });
-  });
 });
 
 

@@ -155,7 +155,6 @@ export const MCP_TOOLSETS = {
     "checkout_status",
     "list_members",
     "list_webhooks",
-    "rate_image",
     "list_requests",
     "request_vehicle",
     "get_request",
@@ -169,15 +168,13 @@ export type McpToolset = keyof typeof MCP_TOOLSETS;
 
 /**
  * Served on `all`, absent from the public reference since the 2026-09-30
- * audit: image feedback (the dashboard rates images now), the original
- * request-board tools (the canonical feedback tools replace them; they keep
+ * audit: the original request-board tools (the canonical feedback tools replace them; they keep
  * working) and the two "about you" tools. The docs, both READMEs, the OpenAPI
  * description and the plugin skills never name them
  * (app/_lib/client-surface-contract.test.ts), and what the reference says
  * `?toolset=all` adds is {@link MCP_DOCUMENTED_EXTRAS}.
  */
 export const MCP_UNLISTED_TOOLS = [
-  "rate_image",
   "list_requests",
   "request_vehicle",
   "get_request",
@@ -503,23 +500,6 @@ export const MCP_TOOL_SCHEMAS = {
   get_account: z.object({}),
   list_members: z.object({}),
   list_webhooks: z.object({}),
-  rate_image: z.object({
-    request_id: z
-      .string()
-      .min(1)
-      .max(128)
-      .optional()
-      .describe("The request_id returned by get_car_image or create_car_image_urls (preferred way to identify the image)."),
-    vehicle: vehicleIdSchema.optional(),
-    make: z.string().min(1).max(80).optional().describe("Alternative to request_id: identify the image by vehicle (make, model, year, or a vehicle id)."),
-    model: z.string().min(1).max(80).optional(),
-    year: z.coerce.number().int().min(MIN_YEAR).max(2100).optional(),
-    view: z.enum(VIEWS).optional(),
-    color: colorSchema.optional(),
-    rating: z.coerce.number().int().min(1).max(5).optional().describe("1 (unusable) to 5 (perfect)."),
-    verdict: z.enum(["good", "bad"]).optional().describe("Quick thumbs up/down; provide this or rating."),
-    reason: z.string().max(500).optional().describe("What was wrong or right, e.g. 'wrong body style', 'perfect angle'."),
-  }),
   report_image: z.strictObject({
     type: z
       .enum(IMAGE_REPORT_TYPES)
@@ -1346,16 +1326,6 @@ export const MCP_TOOL_OUTPUT_SCHEMAS = {
     entitlement: z.looseObject({ plan: z.string(), receives: z.unknown() }).optional(),
     request_id: z.string().optional(),
   }),
-  rate_image: z.looseObject({
-    data: z.looseObject({
-      asset_id: z.string().nullable().optional(),
-      /** True when the render was marked for re-rendering. */
-      flagged: z.boolean(),
-      rating: z.number().int().optional(),
-      verdict: z.enum(["good", "bad"]).optional(),
-    }),
-    request_id: z.string(),
-  }),
   report_image: z.looseObject({
     data: z.looseObject({
       object: z.literal("image_report"),
@@ -1939,15 +1909,6 @@ export const MCP_TOOLS: { [N in McpToolName]: McpToolDefinition<N> } = {
     inputSchema: MCP_TOOL_SCHEMAS.list_webhooks,
     outputSchema: MCP_TOOL_OUTPUT_SCHEMAS.list_webhooks,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  },
-  rate_image: {
-    name: "rate_image",
-    title: "Rate a delivered image",
-    description:
-      "Free. Record quality feedback on a delivered image, either by the request_id returned with it or by vehicle (make, model, year, or a vehicle id, plus view and color). Provide verdict good|bad or rating 1-5 and an optional reason. Feedback drives re-renders and prompt improvements.",
-    inputSchema: MCP_TOOL_SCHEMAS.rate_image,
-    outputSchema: MCP_TOOL_OUTPUT_SCHEMAS.rate_image,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   describe_api: {
     name: "describe_api",

@@ -441,15 +441,6 @@ describe("CarImageClient", () => {
     await expect(pending).rejects.toThrow("stopped");
   });
 
-  it("sends feedback by request id or by vehicle", async () => {
-    const { instance, calls } = client([Response.json({ data: {}, request_id: "a" }, { status: 201 }), Response.json({ data: {}, request_id: "b" }, { status: 201 })]);
-    await instance.feedback({ requestId: "req_9", verdict: "good" });
-    await instance.feedback({ make: "Porsche", model: "911", year: 2024, view: "side", rating: 4, reason: "great" });
-    expect(calls[0]?.body).toEqual({ request_id: "req_9", verdict: "good" });
-    expect(calls[1]?.body).toEqual({ make: "Porsche", model: "911", year: 2024, view: "side", rating: 4, reason: "great" });
-    await expect(instance.feedback({ requestId: "x" })).rejects.toThrow(/rating|verdict/);
-  });
-
   it("files an image report by image or by missing vehicle, and reads it back", async () => {
     const report = {
       object: "image_report", id: "0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10", url: "https://api.example.test/dashboard/image-reports/0b9f3c1e-6a3e-4d55-9b52-0d1d2c6f7a10",

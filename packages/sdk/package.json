@@ -1,6 +1,6 @@
 {
   "name": "@meterapp/car-image-sdk",
-  "version": "1.44.0",
+  "version": "1.45.0",
   "description": "TypeScript SDK for the Car Image API by Meter: studio-quality, transparent-background renders of any vehicle in the open @meterapp/vehicle-db catalog in any paint color, catalog make logos, VIN decoding, stable vehicle ids and textured 3D models. Zero runtime dependencies; works in Node 20+, edge runtimes and browsers.",
   "license": "MIT",
   "author": "Meter <support@carimage.dev> (https://meterapp.co)",

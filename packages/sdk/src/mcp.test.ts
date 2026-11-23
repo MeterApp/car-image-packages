@@ -51,7 +51,6 @@ describe("MCP tool definitions", () => {
         "get_car_image",
       "get_make_logo",
         "list_image_options",
-        "rate_image",
         "report_image",
         "resolve_vehicle",
         "search_vehicles",
@@ -183,7 +182,6 @@ describe("MCP tool definitions", () => {
     expect(parsed).toMatchObject({ width: 960, height: 600, padding: 8, trim: true });
     expect(MCP_TOOL_SCHEMAS.search_vehicles.parse({ query: "porsche 911", year: "2024", limit: "5" })).toEqual({ query: "porsche 911", year: 2024, limit: 5 });
     expect(MCP_TOOL_SCHEMAS.create_car_image_urls.parse({ images: [{ vehicle: "veh_395yw8tn73ff8" }], ttl_seconds: "604800", max_uses: "0", renew_days: "30" })).toMatchObject({ ttl_seconds: 604800, max_uses: 0, renew_days: 30 });
-    expect(MCP_TOOL_SCHEMAS.rate_image.parse({ request_id: "req_1", rating: "4" }).rating).toBe(4);
     expect(MCP_TOOL_SCHEMAS.list_requests.parse({ limit: "10" }).limit).toBe(10);
     // The bounds hold (a size above 1024 is the server's to clamp), and text that is not a number is still refused.
     expect(imageInputSchema.parse({ vehicle: "veh_395yw8tn73ff8", width: "2000" }).width).toBe(2000);
@@ -309,7 +307,6 @@ describe("MCP tool definitions", () => {
     expect(MCP_TOOLS.create_3d_model.inputSchema.parse({ vehicle: "veh_395yw8tn73ff8", color: "1a2b3c" })).toMatchObject({ color: "1a2b3c" });
     expect(() => MCP_TOOLS.create_3d_model.inputSchema.parse({ make: "Toyota", model: "Camry" })).toThrow(/vehicle/);
     expect(() => MCP_TOOLS.create_3d_model.inputSchema.parse({ vehicle: "veh_395yw8tn73ff8", idempotency_key: "bad key!" })).toThrow();
-    expect(MCP_TOOLS.rate_image.inputSchema.parse({ vehicle: "veh_395yw8tn73ff8", color: "#1a2b3c", verdict: "good" })).toMatchObject({ vehicle: "veh_395yw8tn73ff8" });
     expect(MCP_TOOLS.decode_vin.inputSchema.parse({ vin: "1HGCM826*3A", year: "2003" })).toEqual({ vin: "1HGCM826*3A", year: 2003 });
   });
 

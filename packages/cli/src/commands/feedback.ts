@@ -18,14 +18,13 @@ import type { CommandContext, CommandDefinition } from "../context.js";
 import { CliError } from "../errors.js";
 import { keyValues, paint, printJson, table } from "../output.js";
 import { CLI_VERSION } from "../version.js";
-import { rateImageCommand } from "./catalog.js";
 import { flagColor, flagView } from "./images.js";
 import { requestLabel, requestPageLink, SIGN_IN_HINT, votesLabel } from "./request.js";
 
 /**
  * The feedback board from a terminal (docs/customer-feedback.md, "Surfaces"):
  * the same actions as the REST API and the MCP tools. `car-image feedback`
- * with --rating/--good/--bad still rates a delivered image, as before.
+ * `report-image` files a tracked image report (POST /api/v1/images/reports).
  */
 const SUBCOMMANDS = ["list", "show", "mine", "request", "report", "report-image", "upvote", "comment"] as const;
 const USAGE = [
@@ -39,7 +38,6 @@ const USAGE = [
   "car-image feedback report-image show <report id>",
   "car-image feedback upvote <id> [--remove]",
   'car-image feedback comment <id> "<text>"',
-  "car-image feedback (--request-id <id> | --vehicle <veh_…> | --make … --model … --year …) (--rating 1-5 | --good | --bad)   rate an image",
 ].join("\n");
 
 function requireSignIn(ctx: CommandContext): void {
@@ -272,12 +270,14 @@ async function comment(ctx: CommandContext): Promise<number> {
 
 export const feedbackCommand: CommandDefinition = {
   name: "feedback",
-  summary: "Request features, report issues with the request attached, report a wrong image or a missing vehicle, upvote and comment (free); --rating rates an image",
+  summary: "Request features, report issues with the request attached, report a wrong image or a missing vehicle, upvote and comment (free)",
   usage: USAGE,
   async run(ctx: CommandContext): Promise<number> {
     const { flags } = ctx.args;
     const action = ctx.args.positionals[0]?.toLowerCase();
-    if (!action && (flags.rating !== undefined || flags.good === true || flags.bad === true)) return rateImageCommand.run(ctx);
+    if (!action && (flags.rating !== undefined || flags.good === true || flags.bad === true)) {
+      throw new CliError("Image ratings were replaced by image reports", 2, 'Use: car-image feedback report-image --request-id <id> --category identity|camera|paint|quality --reason "..."');
+    }
     switch (action ?? "list") {
       case "list":
         return list(ctx, false);

@@ -442,7 +442,7 @@ describe("stdio MCP output schemas", () => {
     expect((model.data as { status: string }).status).toBe("ready");
   });
 
-  it("adds inline Markdown to signed URLs and passes the feedback receipt through unchanged", async () => {
+  it("adds inline Markdown to signed URLs", async () => {
     const urls = await callTool(
       [
         Response.json(
@@ -460,11 +460,6 @@ describe("stdio MCP output schemas", () => {
     expect(urls.data).toHaveLength(1);
     expect((urls.data as Array<{ markdown: string }>)[0]?.markdown).toContain("](<https://api.test/api/v1/delivery/token>)");
 
-    await callTool(
-      [Response.json({ data: { asset_id: "as_1", recorded: true, flagged: false }, request_id: "req_fb" }, { status: 201 })],
-      "rate_image",
-      { request_id: "req_img", verdict: "good" }
-    );
   });
 
   it("files report_image through the image-reports path and shows the private page", async () => {

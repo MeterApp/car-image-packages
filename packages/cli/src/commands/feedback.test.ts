@@ -84,22 +84,19 @@ describe("car-image feedback", () => {
     expect(seen.map((call) => call.body)).toEqual([{ title: "Interior shots" }, { title: "Interior shots", force: true }]);
   });
 
-  it("lists, upvotes and removes a vote, and still rates an image with --rating", async () => {
+  it("lists, upvotes and removes a vote", async () => {
     const { fetchImpl, seen } = mockFetch([
       () => Response.json({ data: [RECORD], next_cursor: null, request_id: "a" }),
       () => Response.json({ data: { ...RECORD, votes: 5 }, request_id: "b" }),
       () => Response.json({ data: RECORD, request_id: "c" }),
-      () => Response.json({ data: { asset_id: "x", recorded: true, flagged: false }, request_id: "d" }, { status: 201 }),
     ]);
     expect(await run(["feedback", "mine"], fetchImpl)).toBe(0);
     expect(await run(["feedback", "upvote", RECORD.id], fetchImpl)).toBe(0);
     expect(await run(["feedback", "upvote", RECORD.id, "--remove"], fetchImpl)).toBe(0);
-    expect(await run(["feedback", "--request-id", "req_1", "--rating", "5"], fetchImpl)).toBe(0);
     expect(seen.map((call) => `${call.method} ${call.url}`)).toEqual([
       "GET https://api.test/api/v1/feedback?sort=recent_activity&mine=true",
       `POST https://api.test/api/v1/feedback/${RECORD.id}/votes`,
       `DELETE https://api.test/api/v1/feedback/${RECORD.id}/votes`,
-      "POST https://api.test/api/v1/feedback",
     ]);
   });
 });

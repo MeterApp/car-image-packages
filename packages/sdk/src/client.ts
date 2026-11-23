@@ -41,8 +41,6 @@ import {
   type DecodeVinOptions,
   type DeviceCodeResponse,
   type DeviceTokenResult,
-  type FeedbackInput,
-  type FeedbackResponse,
   type ImageReportInput,
   type ImageReportResponse,
   type FetchLike,
@@ -827,33 +825,6 @@ export class CarImageClient {
   }
 
   // ------------------------------------------------------------- feedback
-
-  /** POST /api/v1/feedback — free; rate a delivered image by request id or by vehicle (make, model and year, or a vehicle id). */
-  async feedback(input: FeedbackInput, options: RequestOptions = {}): Promise<FeedbackResponse> {
-    if (input.rating === undefined && input.verdict === undefined) {
-      throw new TypeError("feedback requires a rating (1-5) or a verdict (good|bad)");
-    }
-    const body: Record<string, unknown> = {};
-    if ("requestId" in input && input.requestId) {
-      body.request_id = input.requestId;
-    } else if ("make" in input || "vehicle" in input) {
-      Object.assign(body, imageRequestBody(input));
-      delete body.width;
-      delete body.height;
-      delete body.format;
-    } else {
-      throw new TypeError("feedback requires requestId, a vehicle id, or make/model/year");
-    }
-    if (input.rating !== undefined) body.rating = input.rating;
-    if (input.verdict !== undefined) body.verdict = input.verdict;
-    if (input.reason !== undefined) body.reason = input.reason;
-    const response = await this.send("/api/v1/feedback", {
-      ...options,
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    return this.json<FeedbackResponse>(response);
-  }
 
   /**
    * POST /api/v1/images/reports — free; file a tracked report that starts the

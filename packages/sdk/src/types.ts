@@ -1134,34 +1134,6 @@ export interface VehicleCheckResponse {
   request_id: string;
 }
 
-export type FeedbackTarget = { requestId: string } | (VehicleSelector & { view?: View; color?: Color });
-
-export type FeedbackInput = FeedbackTarget & {
-  rating?: 1 | 2 | 3 | 4 | 5;
-  verdict?: "good" | "bad";
-  reason?: string;
-};
-
-export interface FeedbackResponse {
-  data: {
-    asset_id?: string | null;
-    recorded?: boolean;
-    flagged?: boolean;
-    /**
-     * A negative rating files an image report ({@link CarImageClient.reportImage}):
-     * its id, its private page, its status and whether it is new. Null for a
-     * positive rating; absent from servers that predate image reports.
-     */
-    id?: string | null;
-    url?: string | null;
-    status?: ImageReportStatus | null;
-    created?: boolean | null;
-    report?: ImageReport | null;
-    [key: string]: unknown;
-  };
-  request_id: string;
-}
-
 // ------------------------------------------------------------ image reports
 
 /** What an image report is about: the wrong car, angle or paint; a poor render; or a vehicle the catalog lacks. */
