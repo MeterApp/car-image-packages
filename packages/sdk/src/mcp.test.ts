@@ -137,7 +137,7 @@ describe("MCP tool definitions", () => {
     expect(MCP_TOOLS.report_image.description).toMatch(/^Free\./);
     expect(MCP_TOOLS.report_image.description).toContain("report_issue");
     expect(MCP_TOOL_OUTPUT_SCHEMAS.report_image.parse({
-      data: { object: "image_report", id: "r1", url: "https://carimage.dev/dashboard/image-reports/r1", type: "missing_vehicle", status: "reported", flagged: false, category: null, asset_id: null, vehicle: { make: "Rivian", model: "R3", year: 2026 }, report_count: 1, created_at: "2026-11-23T00:00:00Z", next_field: 1 },
+      data: { object: "image_report", id: "r1", url: "https://carimage.dev/dashboard/image-reports/r1?ref=mcp", type: "missing_vehicle", status: "reported", flagged: false, category: null, asset_id: null, vehicle: { make: "Rivian", model: "R3", year: 2026 }, report_count: 1, created_at: "2026-11-23T00:00:00Z", next_field: 1 },
       created: true,
       request_id: "req",
     }).created).toBe(true);
