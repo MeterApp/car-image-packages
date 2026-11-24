@@ -1,10 +1,10 @@
 import { type OptionsResponse } from "@meterapp/car-image-sdk";
-import { flagInteger, flagString } from "../args.js";
+import { flagInteger } from "../args.js";
 import type { CommandContext, CommandDefinition } from "../context.js";
 import { CliError } from "../errors.js";
 import { cliCommandFor } from "../mcp/server.js";
 import { type Io, keyValues, paint, printJson, table } from "../output.js";
-import { flagColor, flagMarket, flagView } from "./images.js";
+import { flagMarket } from "./images.js";
 
 function yearsLabel(years: number[] | undefined): string {
   if (!years || years.length === 0) return "—";
