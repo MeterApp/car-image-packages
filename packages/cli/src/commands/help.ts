@@ -24,7 +24,7 @@ export function helpText(entries: HelpEntry[], command?: string | null, more: re
   const commands = entries.map((entry) => `  ${entry.name.padEnd(width)}  ${entry.summary}`).join("\n");
   const moreLine = more.length > 0 ? `\n\nMore: ${BIN_NAME} help --all   (${more.length} more: ${more.join(", ")})` : "";
   return `${BIN_NAME} ${CLI_VERSION} — Car Image API by Meter (${PACKAGE_NAME})
-Studio-quality, transparent-background renders of any vehicle in any paint color. Plans count vehicle images (a vehicle in one color from one angle, once a month, any size); Free has 100 a month.
+Studio-quality, transparent-background renders of any vehicle in any paint color. Plans count vehicle images (a vehicle in one color from one angle, once a month, any size); Free has 30 per account, in total.
 Also: make logos (1 credit; car-image logo), stable vehicle ids (--vehicle veh_…), free VIN decoding, and textured 3D models (100 credits each).
 
 Usage:

@@ -11,11 +11,14 @@ function image(headers: Record<string, string> = {}, method = "GET"): Response {
   return new Response(method === "HEAD" ? null : new Uint8Array(2048), { status: 200, headers: { "Content-Type": "image/png", "X-Image-Source": "cache", ...headers } });
 }
 
+/** What production lists since the top view (2026-11): nine, where the check once demanded exactly six. */
+const PRODUCTION_VIEWS = ["front", "front-3-4", "side", "rear-3-4", "rear", "rear-3-4-right", "side-right", "front-3-4-right", "top"];
+
 function fakeApi(overrides: Record<string, (init?: RequestInit) => Response> = {}) {
   const calls: string[] = [];
   const routes: Record<string, (init?: RequestInit) => Response> = {
     "GET /api/health": () => json({ status: "ok", checks: {} }),
-    "GET /api/v1/images/options": () => json({ data: { views: Array.from({ length: 6 }, (_, i) => ({ id: String(i) })), colors: Array.from({ length: 15 }, (_, i) => ({ name: String(i) })) } }),
+    "GET /api/v1/images/options": () => json({ data: { views: PRODUCTION_VIEWS.map((id) => ({ id })), colors: Array.from({ length: 15 }, (_, i) => ({ name: String(i) })) } }),
     "GET /api/v1/vehicles": () => json({ data: { years: Array.from({ length: 37 }, (_, i) => 1990 + i) } }),
     "GET /api/v1/vehicles?year=2024": () => json({ data: { year: 2024, makes: [{ id: 3, name: "Audi" }, { id: 7, name: "Porsche" }] } }),
     "GET /api/v1/vehicles?year=2024&makeId=7": () => json({ data: { year: 2024, make_id: 7, models: [{ id: 1, name: "911" }] } }),
@@ -80,6 +83,22 @@ describe("runDoctor", () => {
     // The doctor never writes a rating: a synthetic "good" on every run would feed the quality loop noise.
     expect(calls.some((call) => call.startsWith("feedback "))).toBe(false);
     expect(doctorSummary(checks)).toEqual({ passed: 12, failed: 0, skipped: 0, ok: true });
+  });
+
+  // 2026-11-24: `car-image doctor` against production said "options FAIL  9 views, 15 colors" and
+  // exited 1 for every user, because the check demanded exactly six views.
+  it("passes options whatever the API's view count, and fails it only without the default view or any paint", async () => {
+    const options = (views: string[], colors: number) => ({
+      "GET /api/v1/images/options": () => json({ data: { views: views.map((id) => ({ id })), colors: Array.from({ length: colors }, (_, i) => ({ name: String(i) })) } }),
+    });
+    const check = async (views: string[], colors: number) => (await runDoctor(fakeApi(options(views, colors)).deps)).find((entry) => entry.name === "options");
+
+    expect(await check(PRODUCTION_VIEWS, 15)).toMatchObject({ status: "pass", notes: "9 views, 15 colors" });
+    expect(await check(PRODUCTION_VIEWS.slice(0, 6), 15)).toMatchObject({ status: "pass", notes: "6 views, 15 colors" });
+    expect(await check([...PRODUCTION_VIEWS, "underside"], 16)).toMatchObject({ status: "pass" });
+    expect(await check(["front", "rear"], 15)).toMatchObject({ status: "fail" });
+    expect(await check(PRODUCTION_VIEWS, 0)).toMatchObject({ status: "fail" });
+    expect(await check([], 15)).toMatchObject({ status: "fail" });
   });
 
   it("skips the keyed image when declined", async () => {

@@ -66,6 +66,9 @@ function problemDetail(body: Body): string | null {
   return null;
 }
 
+/** The view an image request gets when it names none; `GET /api/v1/images/options` must list it. */
+const DEFAULT_VIEW = "front-3-4";
+
 function get(value: unknown, path: string): unknown {
   let current: unknown = value;
   for (const segment of path.split(".")) {
@@ -175,7 +178,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorCheck[]> {
       await probe(deps, "options", () => deps.client.fetch("/api/v1/images/options", { headers: JSON_HEADERS }), (_response, body) => {
         const views = get("json" in body ? body.json : null, "data.views");
         const colors = get("json" in body ? body.json : null, "data.colors");
-        const ok = Array.isArray(views) && views.length === 6 && Array.isArray(colors) && colors.length === 15;
+        // The API owns how many views and colors there are: an exact count here failed every run once the API
+        // listed more views than this check was written for. What a client needs is the default view and a paint.
+        const ok = Array.isArray(views) && views.some((view) => get(view, "id") === DEFAULT_VIEW) && Array.isArray(colors) && colors.length > 0;
         return { ok, notes: `${Array.isArray(views) ? views.length : 0} views, ${Array.isArray(colors) ? colors.length : 0} colors` };
       })
     ).check
