@@ -54,6 +54,9 @@ describe("main", () => {
     expect(first).toContain("Commands:");
     for (const name of ["login", "get", "url", "search", "vin", "doctor"]) expect(first).toMatch(new RegExp(`^  ${name}\\s{2,}`, "m"));
     expect(first).toContain("More: car-image help --all");
+    // Free is 30 vehicle images per account in total (carimage.dev/pricing); the help once said "100 a month".
+    expect(first).toContain("Free has 30 per account, in total.");
+    expect(first).not.toContain("a month.");
     expect(first).not.toMatch(/^ {2}agent-config\s{2,}/m);
     expect(first).not.toMatch(/^ {2}request \(requests\)/m);
     out = [];
