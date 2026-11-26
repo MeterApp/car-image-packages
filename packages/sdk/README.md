@@ -1,6 +1,6 @@
 # @meterapp/car-image-sdk
 
-TypeScript SDK for the **Car Image API** by Meter — studio-quality, transparent-background renders of any vehicle in the open [`@meterapp/vehicle-db`](https://github.com/MeterApp/vehicle-db) catalog (1,610 makes, 42,370 models, model years 1990–2027, each with a page at [carimage.dev/cars](https://carimage.dev/cars?ref=npm-sdk)), in nine camera views and any paint color; plus stable vehicle ids, free VIN decoding and textured 3D models.
+TypeScript SDK for the **Car Image API** by Meter — studio-quality, transparent-background renders of any vehicle in the open [`@meterapp/vehicle-db`](https://github.com/MeterApp/vehicle-db) catalog (1,610 makes, 42,372 models, model years 1990–2027, each with a page at [carimage.dev/cars](https://carimage.dev/cars?ref=npm-sdk)), in nine camera views and any paint color; plus stable vehicle ids, free VIN decoding and textured 3D models.
 
 - Zero runtime dependencies. Works in Node 20+, Vercel/Cloudflare edge runtimes, Deno, Bun and browsers.
 - Typed parameters and responses for every endpoint.
