@@ -208,6 +208,12 @@ function appearanceHeader(headers: Headers): Appearance | null {
   return { market: market ? market.toUpperCase() : null, scope };
 }
 
+/** `X-Image-Verified`, a UTC day, or null. */
+function verifiedHeader(headers: Headers): string | null {
+  const raw = headers.get("x-image-verified");
+  return raw !== null && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+}
+
 function vehicleIdHeader(headers: Headers): VehicleId | null {
   const raw = headers.get("x-vehicle-id");
   return raw !== null && VEHICLE_ID_PATTERN.test(raw) ? raw : null;
@@ -377,6 +383,7 @@ export class CarImageClient {
       requestId: response.headers.get("x-request-id"),
       vehicleId: vehicleIdHeader(response.headers),
       appearance: appearanceHeader(response.headers),
+      verifiedOn: verifiedHeader(response.headers),
     };
   }
 

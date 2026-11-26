@@ -457,6 +457,12 @@ export interface ImageResult {
   vehicleId: VehicleId | null;
   /** Which appearance was served (`X-Vehicle-Appearance`); null or absent from servers that predate it, and on a make logo. */
   appearance?: Appearance | null;
+  /**
+   * `X-Image-Verified`: the UTC day (`YYYY-MM-DD`) these exact bytes were compared with the manufacturer's own material
+   * for that model year and matched (`/docs/quality#verified`); null when they have not been (which does not mean wrong),
+   * absent from servers that predate it.
+   */
+  verifiedOn?: string | null;
 }
 
 export interface VehicleDescriptor {
