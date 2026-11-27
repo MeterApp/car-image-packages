@@ -1,6 +1,6 @@
 {
   "name": "@meterapp/car-image",
-  "version": "1.36.1",
+  "version": "1.37.0",
   "mcpName": "dev.carimage/car-image",
   "description": "CLI and MCP server for the Car Image API by Meter: studio-quality, transparent-background vehicle renders for agents, apps and browsers. Login, fetch images in any paint color and make logos, mint signed URLs, decode VINs, build 3D models, request missing vehicles, run diagnostics, configure agents.",
   "license": "MIT",
@@ -52,7 +52,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@meterapp/car-image-sdk": "^1.45.0",
+    "@meterapp/car-image-sdk": "^1.46.0",
     "@modelcontextprotocol/server": "^2.4.0",
     "zod": "^4.6.5"
   },

@@ -3,7 +3,8 @@ import { CREDITS_PER_DOLLAR } from "@meterapp/car-image-sdk";
 import { maskKey } from "../config.js";
 import type { CommandContext, CommandDefinition } from "../context.js";
 import { CliError } from "../errors.js";
-import { creditsToUsd, formatInteger, keyValues, printJson } from "../output.js";
+import { flagString } from "../args.js";
+import { creditsToUsd, formatInteger, keyValues, printJson, table } from "../output.js";
 
 /** What each plan's license means, in one line (/terms#license). */
 const LICENSE_LINES: Record<string, string> = {
@@ -16,12 +17,20 @@ export const whoamiCommand: CommandDefinition = {
   name: "whoami",
   aliases: ["status", "account"],
   summary: "Show the organization, plan and license, this month's vehicle images, credits, key and base URL for the current account",
-  usage: "car-image whoami [--json]",
+  usage:
+    "car-image whoami [--json]\n" +
+    "car-image whoami campaigns [--from <date>] [--to <date>] [--json]\n" +
+    "  campaigns: campaign tracking (the --campaign and --pieces of get and url) over [from, to): pieces, requests and loads by campaign,\n" +
+    "  and the vehicles each campaign used. --from defaults to the start of this UTC month, --to to now; a date (2026-11-01) or an ISO timestamp,\n" +
+    "  at most 400 days apart. Free; needs the account:read scope",
   async run(ctx: CommandContext): Promise<number> {
     const { io, clientContext } = ctx;
     if (!clientContext.apiKey) {
       throw new CliError("Not signed in.", 1, "Run `car-image login` or set CAR_IMAGE_API_KEY.");
     }
+    const sub = ctx.args.positionals[0];
+    if (sub === "campaigns") return runCampaigns(ctx);
+    if (sub !== undefined) throw new CliError(`Unknown whoami command "${sub}". Use campaigns, or no subcommand for the account.`, 2);
     const account = await clientContext.client.account();
     if (io.json) {
       printJson(io, { ...account, key_source: clientContext.keySource, base_url: clientContext.baseUrl });
@@ -76,3 +85,41 @@ export const whoamiCommand: CommandDefinition = {
     return 0;
   },
 };
+
+/** `car-image whoami campaigns`: GET /api/v1/account/campaigns as two tables. */
+async function runCampaigns(ctx: CommandContext): Promise<number> {
+  const { io, clientContext } = ctx;
+  const from = flagString(ctx.args.flags, "from");
+  const to = flagString(ctx.args.flags, "to");
+  const result = await clientContext.client.getCampaignUsage({ ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) });
+  if (io.json) {
+    printJson(io, result);
+    return 0;
+  }
+  const data = result.data;
+  const totals = data.totals;
+  io.stdout(
+    `Campaigns ${data.from.slice(0, 10)} to ${data.to.slice(0, 10)}: ${formatInteger(totals.pieces)} pieces over ${formatInteger(totals.requests)} tagged requests, ` +
+      `${formatInteger(totals.campaigns)} campaign${totals.campaigns === 1 ? "" : "s"}, ${formatInteger(totals.loads)} loads of tagged URLs\n`
+  );
+  if (data.by_campaign.length === 0) {
+    if (!io.quiet) io.stdout("\nNo tagged requests in this window. Tag one with car-image get or url --campaign <label> --pieces <count>.\n");
+    return 0;
+  }
+  io.stdout(
+    `\n${table(
+      data.by_campaign.map((row) => [row.campaign ?? "(no campaign)", formatInteger(row.pieces), formatInteger(row.requests), formatInteger(row.loads)]),
+      ["Campaign", "Pieces", "Requests", "Loads"]
+    )}\n`
+  );
+  if (data.by_vehicle.length) {
+    io.stdout(
+      `\n${table(
+        data.by_vehicle.map((row) => [`${row.year} ${row.make} ${row.model}`, row.vehicle_id ?? "", formatInteger(row.pieces), row.campaigns.join(", ")]),
+        ["Vehicle", "Id", "Pieces", "Campaigns"]
+      )}\n`
+    );
+  }
+  if (data.truncated && !io.quiet) io.stderr("Only the 500 largest campaigns and vehicles are listed; narrow --from/--to for the rest.\n");
+  return 0;
+}

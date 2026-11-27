@@ -3,6 +3,7 @@ export { CarImageError, isCarImageError, type CarImageErrorInit, type ProblemDet
 export {
   assertImageParams,
   assertVehicleSelector,
+  campaignTags,
   colorParam,
   imageRequestBody,
   imageSearchParams,
@@ -11,7 +12,9 @@ export {
   isCssColorName,
   isHexColor,
   isPresetColor,
+  normalizeCampaign,
   normalizeMarket,
+  normalizePieces,
   normalizeYear,
   parseView,
   suggestedFileName,

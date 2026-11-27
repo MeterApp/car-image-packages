@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { ASPECT_RATIOS, COLORS, FITS, FRAMINGS, MARKET_PATTERN, MAX_PADDING_PERCENT, REQUEST_FORMATS, RESOLUTIONS, SIZES, VIEWS, isColor, isHexColor, parseView, suggestedFileName, type ImageParams, type MakeLogoParams, type Size, type VehicleSelector, type View } from "@meterapp/car-image-sdk";
+import { ASPECT_RATIOS, COLORS, FITS, FRAMINGS, MARKET_PATTERN, MAX_PADDING_PERCENT, REQUEST_FORMATS, RESOLUTIONS, SIZES, VIEWS, campaignTags, isColor, isHexColor, parseView, suggestedFileName, type CampaignTags, type ImageParams, type MakeLogoParams, type Size, type TaggedImageParams, type VehicleSelector, type View } from "@meterapp/car-image-sdk";
 import { MAKE_LOGO_NOTICE } from "@meterapp/car-image-sdk/mcp";
 import { flagBoolean, flagChoice, flagInteger, flagString, requireString, type FlagValue } from "../args.js";
 import type { CommandContext, CommandDefinition } from "../context.js";
@@ -52,6 +52,34 @@ export function flagMarket(flags: Record<string, FlagValue>): string | undefined
     throw new CliError(`Invalid --market "${value}". Send the market of sale as a two-letter country code such as US, GB, DE, AU or JP`, 2);
   }
   return value.trim().toUpperCase();
+}
+
+/**
+ * Campaign tracking: `--campaign <label>` and `--pieces <count>`, checked the
+ * way the server reads them (a one-line label of at most 100 characters; a
+ * whole number from 1 to 10,000,000). Labels recorded beside the request for
+ * campaign reports (`car-image whoami campaigns`); they never change the image
+ * or the charge.
+ */
+export function campaignFromFlags(flags: Record<string, FlagValue>): CampaignTags {
+  const campaign = flagString(flags, "campaign");
+  const rawPieces = flagString(flags, "pieces");
+  let pieces: number | undefined;
+  if (rawPieces !== undefined) {
+    // Plain digits, as the server reads a query: 2,500 and 2.5e3 are refused rather than read as some other count.
+    if (!/^\s*\d{1,9}\s*$/.test(rawPieces)) throw new CliError(`Invalid --pieces "${rawPieces}". Send a whole number from 1 to 10,000,000 in plain digits, such as 25000`, 2);
+    pieces = Number(rawPieces.trim());
+  }
+  return tagsOrUsageError({ campaign, pieces }, (message) => message.replace(/\b(campaign|pieces)\b/, "--$1"));
+}
+
+/** Runs the SDK's campaign checks, reporting a bad value as a usage error (exit 2). */
+function tagsOrUsageError(tags: CampaignTags, describe: (message: string) => string): CampaignTags {
+  try {
+    return campaignTags(tags);
+  } catch (error) {
+    throw new CliError(describe(error instanceof Error ? error.message : String(error)), 2);
+  }
 }
 
 /**
@@ -139,11 +167,16 @@ export function billingClause(billing: { credits_charged: number; credits_remain
   return `charged ${billing.credits_charged} credit${billing.credits_charged === 1 ? "" : "s"}, ${billing.credits_remaining?.toLocaleString("en-US") ?? "?"} remaining`;
 }
 
+const CAMPAIGN_HELP =
+  "  --campaign <label> and --pieces <count> tag the request for campaign tracking: the campaign or send it is for (one line, at most 100 characters)\n" +
+  "  and how many pieces (emails, mail pieces, impressions) it will appear in (1 to 10,000,000); never part of the image or the charge.\n" +
+  "  Read them back with car-image whoami campaigns";
+
 export const getCommand: CommandDefinition = {
   name: "get",
   summary: "Download one image (one vehicle image of the month on a plan) or print a signed URL with --url",
   usage:
-    "car-image get (--make <make> --model <model> --year <year> | --vehicle <veh_…>) [--view front-3-4] [--color silver|<hex>]\n               [--size thumb|small|medium|large | --width <px> [--height <px>] [--fit contain|cover|inside]] [--aspect-ratio 16:9] [--resolution hd]\n               [--background transparent|white|black|<hex>] [--framing consistent|tight|balanced | --trim [--padding <0-50>]] [--shadow] [--format png|webp|jpg|auto]\n               [--market <country code>] [--out <file> | --out -] [--url] [--json]\n" +
+    "car-image get (--make <make> --model <model> --year <year> | --vehicle <veh_…>) [--view front-3-4] [--color silver|<hex>]\n               [--size thumb|small|medium|large | --width <px> [--height <px>] [--fit contain|cover|inside]] [--aspect-ratio 16:9] [--resolution hd]\n               [--background transparent|white|black|<hex>] [--framing consistent|tight|balanced | --trim [--padding <0-50>]] [--shadow] [--format png|webp|jpg|auto]\n               [--market <country code>] [--campaign <label>] [--pieces <count>] [--out <file> | --out -] [--url] [--json]\n" +
     `  --view takes one of the nine angles: ${VIEWS.join(", ")} (left, right, front-left and the other corners work too)\n` +
     "  --color takes one of the 15 presets, a CSS color name (navy) or any paint as hex (#1a2b3c, 1a2b3c, #abc); --background takes the same names and hex\n" +
     "  --width and --height are delivered up to the stored image's own size (1024 px square for older renders, up to 2560 px for new ones; a box keeps its shape); --vehicle takes a stable id from search, resolve or vin\n" +
@@ -153,24 +186,25 @@ export const getCommand: CommandDefinition = {
     "  consistent (the default) keeps one apparent scale across a vehicle's views; not with --trim or --padding\n" +
     "  --shadow adds a soft ground shadow under the car, drawn from its cut-out (same image, nothing extra)\n" +
     "  --market names the market of sale (a two-letter country code such as AU), for model years that look different in different markets;\n" +
-    "  today every market gets the default appearance and the answer says which was served; the same image is counted once under any market",
+    "  today every market gets the default appearance and the answer says which was served; the same image is counted once under any market\n" +
+    CAMPAIGN_HELP,
   run: (ctx) => runImageCommand(ctx),
 };
 
 async function runImageCommand(ctx: CommandContext, isLogo = false): Promise<number> {
   const { io, clientContext } = ctx;
   if (isLogo) {
-    for (const flag of ["vehicle", "model", "year", "view", "color", "framing", "shadow", "market", "url", "batch", "prompt"]) {
+    for (const flag of ["vehicle", "model", "year", "view", "color", "framing", "shadow", "market", "url", "batch", "prompt", "campaign", "pieces"]) {
       if (ctx.args.flags[flag] !== undefined) throw new CliError(`--${flag} is not supported for make logos`, 2);
     }
   }
   const params = isLogo
     ? { make: requireString(ctx.args.flags, "make"), ...imageTransformFromFlags(ctx.args.flags) }
-    : imageParamsFromFlags(ctx.args.flags);
+    : { ...imageParamsFromFlags(ctx.args.flags), ...campaignFromFlags(ctx.args.flags) };
   if (!clientContext.apiKey) throw new CliError("Not signed in.", 1, "Run `car-image login` or set CAR_IMAGE_API_KEY.");
 
   if (flagBoolean(ctx.args.flags, "url")) {
-    const result = await clientContext.client.getImageUrl(params as ImageParams);
+    const result = await clientContext.client.getImageUrl(params as TaggedImageParams);
     if (io.json) {
       printJson(io, result);
     } else {
@@ -184,7 +218,7 @@ async function runImageCommand(ctx: CommandContext, isLogo = false): Promise<num
 
   const image = isLogo
     ? await clientContext.client.getMakeLogo(params as MakeLogoParams)
-    : await clientContext.client.getImage(params as ImageParams);
+    : await clientContext.client.getImage(params as TaggedImageParams);
   const format = formatFromContentType(image.contentType);
   const logoName = `${(params.make ?? "make").normalize("NFD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "make"}-logo.${format}`;
   const out = flagString(ctx.args.flags, "out") ?? (isLogo ? logoName : suggestedFileName({ ...params as ImageParams, format }));
@@ -210,6 +244,9 @@ async function runImageCommand(ctx: CommandContext, isLogo = false): Promise<num
     ...(isLogo ? { notice: MAKE_LOGO_NOTICE } : { vehicle_id: image.vehicleId }),
     // Which appearance was served (X-Vehicle-Appearance), when the server says.
     ...(!isLogo && image.appearance ? { appearance: image.appearance } : {}),
+    // Campaign tracking: what the request recorded (X-Campaign, X-Pieces).
+    ...(image.campaign ? { campaign: image.campaign } : {}),
+    ...(typeof image.pieces === "number" ? { pieces: image.pieces } : {}),
   };
   if (io.json) {
     if (out === "-") io.stderr(`${JSON.stringify(meta)}\n`);
@@ -238,7 +275,7 @@ function formatFromContentType(contentType: string): ImageParams["format"] {
   return "png";
 }
 
-async function readBatch(path: string): Promise<ImageParams[]> {
+async function readBatch(path: string): Promise<TaggedImageParams[]> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -277,7 +314,15 @@ async function readBatch(path: string): Promise<ImageParams[]> {
     if (typeof record.resolution === "string") params.resolution = record.resolution as ImageParams["resolution"];
     if (record.trim === true) params.trim = true;
     if (record.shadow === true) params.shadow = true;
-    return params;
+    // An entry's own campaign tracking labels override --campaign/--pieces for its URL.
+    const tags = tagsOrUsageError(
+      {
+        ...(record.campaign !== undefined ? { campaign: record.campaign as string } : {}),
+        ...(record.pieces !== undefined ? { pieces: record.pieces as number } : {}),
+      },
+      (message) => `Batch entry ${index}: ${message}`
+    );
+    return { ...params, ...tags };
   });
 }
 
@@ -285,7 +330,10 @@ export const urlCommand: CommandDefinition = {
   name: "url",
   summary: "Create signed, key-free delivery URLs (each counts its vehicle image of the month) for browsers and documents",
   usage:
-    "car-image url (--make <make> --model <model> --year <year> | --vehicle <veh_…>) [--view] [--color silver|<hex>] [--size|--width|--height] [--fit] [--background] [--framing|--trim] [--shadow] [--format] [--market <country code>]\n               [--ttl 3600] [--max-uses 0] [--renew [--renew-days 365]] [--idempotency-key <key>] [--json]\ncar-image url --batch images.json [--market <country code>] [--ttl 3600] [--max-uses 0] [--renew [--renew-days 365]] [--idempotency-key <key>] [--json]",
+    "car-image url (--make <make> --model <model> --year <year> | --vehicle <veh_…>) [--view] [--color silver|<hex>] [--size|--width|--height] [--fit] [--background] [--framing|--trim] [--shadow] [--format] [--market <country code>]\n               [--campaign <label>] [--pieces <count>] [--ttl 3600] [--max-uses 0] [--renew [--renew-days 365]] [--idempotency-key <key>] [--json]\ncar-image url --batch images.json [--market <country code>] [--campaign <label>] [--pieces <count>] [--ttl 3600] [--max-uses 0] [--renew [--renew-days 365]] [--idempotency-key <key>] [--json]\n" +
+    "  --campaign and --pieces tag the URLs for campaign tracking; with --batch they are the default for entries that name none, and\n" +
+    "  each entry may carry its own \"campaign\" and \"pieces\" (how many pieces that URL will appear in). Never part of an image or the charge.\n" +
+    "  Read them back with car-image whoami campaigns",
   async run(ctx: CommandContext): Promise<number> {
     const { io, clientContext } = ctx;
     if (!clientContext.apiKey) throw new CliError("Not signed in.", 1, "Run `car-image login` or set CAR_IMAGE_API_KEY.");
@@ -304,7 +352,9 @@ export const urlCommand: CommandDefinition = {
     const idempotencyKey = flagString(ctx.args.flags, "idempotency-key");
     // With --batch, --market is the market of every entry that names none of its own.
     const market = batchPath ? flagMarket(ctx.args.flags) : undefined;
-    const result = await clientContext.client.createImageUrls(images, { ttlSeconds, maxUses, renew, renewDays, idempotencyKey, market });
+    // --campaign/--pieces: the batch's default labels (for one image, that image's own).
+    const { campaign, pieces } = campaignFromFlags(ctx.args.flags);
+    const result = await clientContext.client.createImageUrls(images, { ttlSeconds, maxUses, renew, renewDays, idempotencyKey, market, campaign, pieces });
     if (io.json) {
       printJson(io, result);
       return 0;
@@ -313,9 +363,18 @@ export const urlCommand: CommandDefinition = {
     if (!io.quiet) {
       const first = result.data[0];
       io.stderr(
-        `${result.data.length} URL${result.data.length === 1 ? "" : "s"}${first ? `, expire ${first.expires_at}, max uses ${first.max_uses === 0 ? "unlimited" : first.max_uses}` : ""} · ${billingClause(result.billing)} · request ${result.request_id}\n`
+        `${result.data.length} URL${result.data.length === 1 ? "" : "s"}${first ? `, expire ${first.expires_at}, max uses ${first.max_uses === 0 ? "unlimited" : first.max_uses}` : ""} · ${billingClause(result.billing)}${campaignClause(result)} · request ${result.request_id}\n`
       );
     }
     return 0;
   },
 };
+
+/** ` · campaign "…", 2,500 pieces` when the answer echoes campaign tracking labels. */
+function campaignClause(tags: { campaign?: string; pieces?: number }): string {
+  const parts = [
+    ...(tags.campaign ? [`campaign "${tags.campaign}"`] : []),
+    ...(typeof tags.pieces === "number" ? [`${tags.pieces.toLocaleString("en-US")} piece${tags.pieces === 1 ? "" : "s"}`] : []),
+  ];
+  return parts.length ? ` · ${parts.join(", ")}` : "";
+}

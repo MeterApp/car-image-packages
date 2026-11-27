@@ -555,6 +555,37 @@ describe("stdio MCP output schemas", () => {
     expect(text(payloadOut.result!)).toContain("Replayed the result stored for this idempotency_key");
   });
 
+  it("passes campaign and pieces through create_car_image_urls, per image and for the batch", async () => {
+    const payload = {
+      data: [{ id: "u1", url: "https://api.test/api/v1/delivery/token", expires_at: "2026-09-14T00:00:00Z", max_uses: 0, vehicle: VEHICLE, campaign: "Owners mailer", pieces: 3200 }],
+      billing: { charged_on: "creation", credits_charged: 0 },
+      campaign: "Owners mailer",
+      pieces: 3200,
+      request_id: "req_urls",
+    };
+    const { client, calls } = clientWith([Response.json(payload, { status: 201 })]);
+    const server = buildStdioMcpServer(client);
+    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    await server.connect(transport);
+    const response = await transport.handleRequest(
+      new Request("https://stdio.test/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "create_car_image_urls", arguments: { images: [{ make: "Porsche", model: "911", year: 2024, pieces: 3200 }], campaign: "Owners mailer", pieces: 1 } },
+        }),
+      })
+    );
+    const payloadOut = (await response.json()) as ToolCallPayload;
+    await transport.close();
+    expect(payloadOut.result?.isError).toBeUndefined();
+    expect(calls[0]?.body).toMatchObject({ images: [{ make: "Porsche", model: "911", year: 2024, pieces: 3200 }], campaign: "Owners mailer", pieces: 1 });
+    expect(payloadOut.result?.structuredContent).toMatchObject({ campaign: "Owners mailer", pieces: 3200, data: [{ pieces: 3200 }] });
+  });
+
   it("fetches png for an inline image asked for as auto", async () => {
     const bytes = new Uint8Array([137, 80, 78, 71]);
     const { client, calls } = clientWith([

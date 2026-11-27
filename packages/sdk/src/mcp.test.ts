@@ -37,7 +37,7 @@ import {
   vinNextStepFor,
   type McpToolName,
 } from "./mcp/index.js";
-import { IDEMPOTENCY_KEY_PATTERN, MAX_CHECK_VIEWS_VEHICLES } from "./types.js";
+import { IDEMPOTENCY_KEY_PATTERN, IMAGE_QUERY_ALIASES, MAX_CHECK_VIEWS_VEHICLES } from "./types.js";
 
 describe("MCP tool definitions", () => {
   it("exposes all 41 tools with agent-grade descriptions", () => {
@@ -117,6 +117,37 @@ describe("MCP tool definitions", () => {
     expect(json.properties.framing?.default).toBeUndefined();
     expect(json.required ?? []).not.toContain("framing");
     expect(String(json.properties.framing?.description)).toMatch(/never with them/);
+  });
+
+  it("takes campaign tracking labels on get_car_image, on each image and beside the images, one type each", () => {
+    const car = { vehicle: "veh_395yw8tn73ff8" };
+    expect(imageInputSchema.parse({ ...car, campaign: "  Spring mailer 2026 ", pieces: "25000" })).toMatchObject({ campaign: "Spring mailer 2026", pieces: 25_000 });
+    expect(imageInputSchema.parse(car)).not.toHaveProperty("campaign");
+    for (const bad of [{ pieces: 0 }, { pieces: 10_000_001 }, { pieces: 2.5 }, { pieces: "2,500" }, { campaign: "" }, { campaign: "x".repeat(101) }, { campaign: "two\nlines" }]) {
+      expect(() => imageInputSchema.parse({ ...car, ...bad }), JSON.stringify(bad)).toThrow();
+    }
+    const batch = MCP_TOOL_SCHEMAS.create_car_image_urls.parse({ images: [{ ...car, pieces: 3200 }, car], campaign: "Owners mailer Nov", pieces: "5100" });
+    expect(batch).toMatchObject({ campaign: "Owners mailer Nov", pieces: 5100, images: [{ pieces: 3200 }, {}] });
+    for (const name of ["get_car_image", "create_car_image_urls"] as const) {
+      const json = z.toJSONSchema(MCP_TOOL_SCHEMAS[name], { io: "input" }) as { required?: string[]; properties: Record<string, Record<string, unknown>> };
+      expect(json.properties.campaign, name).toMatchObject({ type: "string", minLength: 1, maxLength: 100 });
+      expect(json.properties.pieces, name).toMatchObject({ type: "integer", minimum: 1, maximum: 10_000_000 });
+      expect(json.required ?? [], name).not.toContain("campaign");
+      expect(json.required ?? [], name).not.toContain("pieces");
+    }
+    const urls = z.toJSONSchema(MCP_TOOL_SCHEMAS.create_car_image_urls, { io: "input" }) as unknown as { properties: { images: { items: { properties: Record<string, Record<string, unknown>> } } } };
+    expect(urls.properties.images.items.properties.pieces).toMatchObject({ type: "integer", maximum: 10_000_000 });
+    expect(urls.properties.images.items.properties.campaign).toMatchObject({ type: "string", maxLength: 100 });
+    // The echo is typed on both results.
+    expect(MCP_TOOL_OUTPUT_SCHEMAS.create_car_image_urls.parse({
+      data: [{ id: "a", url: "https://u", expires_at: "x", max_uses: 0, vehicle: { vehicle_id: null, make: "m", model: "m", year: 2024, view: "side", color: "silver", format: "png" }, campaign: "c", pieces: 3 }],
+      billing: { charged_on: "creation", credits_charged: 0 }, campaign: "c", pieces: 3, request_id: "r",
+    }).pieces).toBe(3);
+    expect(MCP_TOOLS.create_car_image_urls.description).toContain("pieces");
+    expect(MCP_TOOLS.get_car_image.description).toContain("campaign");
+    // Campaign labels are not image query parameters.
+    expect(Object.keys(IMAGE_QUERY_ALIASES)).not.toContain("campaign");
+    expect(Object.keys(IMAGE_QUERY_ALIASES)).not.toContain("pieces");
   });
 
   it("reads report_image strictly, with one type per field", () => {

@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { CREDITS_PER_DOLLAR, colorParam, isCarImageError, isHexColor, type CarImageClient, type FiledFeedbackResponse, type ImageParams, type ImageReportInput, type VehicleSelector } from "@meterapp/car-image-sdk";
+import { CREDITS_PER_DOLLAR, colorParam, isCarImageError, isHexColor, type CarImageClient, type FiledFeedbackResponse, type ImageReportInput, type TaggedImageParams, type VehicleSelector } from "@meterapp/car-image-sdk";
 import {
   DEFAULT_MCP_TOOLSET,
   MCP_SERVER_INFO,
@@ -53,8 +53,8 @@ export function echoColor(color: string): string {
 }
 
 /** Converts the zod-parsed tool input into SDK params (drops undefined optionals). */
-export function toImageParams(input: ImageInput): ImageParams {
-  const params: ImageParams = { ...toVehicleSelector(input), view: input.view, color: input.color, format: input.format };
+export function toImageParams(input: ImageInput): TaggedImageParams {
+  const params: TaggedImageParams = { ...toVehicleSelector(input), view: input.view, color: input.color, format: input.format };
   if (input.size) params.size = input.size;
   if (input.width !== undefined) params.width = input.width;
   if (input.height !== undefined) params.height = input.height;
@@ -67,6 +67,8 @@ export function toImageParams(input: ImageInput): ImageParams {
   if (input.padding !== undefined) params.padding = input.padding;
   if (input.shadow !== undefined) params.shadow = input.shadow;
   if (input.market !== undefined) params.market = input.market;
+  if (input.campaign !== undefined) params.campaign = input.campaign;
+  if (input.pieces !== undefined) params.pieces = input.pieces;
   return params;
 }
 
@@ -340,6 +342,9 @@ export function buildStdioMcpServer(client: CarImageClient, toolset: McpToolset 
       },
       // Which appearance was served (X-Vehicle-Appearance), as the hosted server's result says.
       ...(image.appearance ? { appearance: image.appearance } : {}),
+      // Campaign tracking: what the request recorded (X-Campaign, X-Pieces), as the hosted server's result says.
+      ...(image.campaign ? { campaign: image.campaign } : {}),
+      ...(typeof image.pieces === "number" ? { pieces: image.pieces } : {}),
     };
     return {
       content: [
@@ -360,6 +365,8 @@ export function buildStdioMcpServer(client: CarImageClient, toolset: McpToolset 
       renewDays: input.renew_days,
       idempotencyKey: input.idempotency_key,
       market: input.market,
+      campaign: input.campaign,
+      pieces: input.pieces,
     });
     return jsonToolResult({ ...withImageMarkdown(result) }, imageUrlsSummary(result));
   });

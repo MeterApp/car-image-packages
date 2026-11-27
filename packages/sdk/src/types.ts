@@ -410,6 +410,37 @@ export interface ImageOptions {
 /** One image request: `{ make, model, year }` or `{ vehicle }`, plus the options and, optionally, the market of sale. */
 export type ImageParams = VehicleSelector & ImageOptions & MarketOption;
 
+/** At most this many characters (code points) in a `campaign` label, after trimming. */
+export const MAX_CAMPAIGN_LENGTH = 100;
+/** At most this many `pieces` on one image or URL. */
+export const MAX_PIECES = 10_000_000;
+
+/**
+ * Campaign tracking, optional: labels recorded beside an image request or a
+ * URL mint for your own logs, campaign reports and Enterprise usage reporting,
+ * and read back with `getCampaignUsage`. They never change the image, its
+ * cache entry, its URL or its charge, and they are not image query parameters
+ * (they are not in {@link IMAGE_QUERY_ALIASES}). Not `utm_campaign`, which
+ * stays an ignored tracking tag.
+ */
+export interface CampaignTags {
+  /**
+   * The campaign or send the image is for: free text, trimmed, 1 to 100
+   * characters, one line (no control characters or line breaks). Blank reads
+   * as none. Echoed in `X-Campaign`.
+   */
+  campaign?: string;
+  /**
+   * How many pieces (emails, mail pieces, impressions) the image or URL will
+   * appear in: a good-faith whole number from 1 to 10,000,000. A per-piece
+   * Enterprise agreement is invoiced from these totals. Echoed in `X-Pieces`.
+   */
+  pieces?: number;
+}
+
+/** An image request with its campaign tracking labels: what `getImage`, `getImageUrl` and each image of `createImageUrls` take. */
+export type TaggedImageParams = ImageParams & CampaignTags;
+
 /** A catalog make logo: 1 credit per delivery; trademarks are not licensed. */
 export type MakeLogoParams = { make: Make } & Omit<ImageOptions, "view" | "color" | "shadow" | "framing">;
 
@@ -463,6 +494,10 @@ export interface ImageResult {
    * absent from servers that predate it.
    */
   verifiedOn?: string | null;
+  /** `X-Campaign` (decoded): the campaign label recorded for the request; null when none was sent, absent from servers that predate it. */
+  campaign?: string | null;
+  /** `X-Pieces`: the piece count recorded for the request; null when none was sent, absent from servers that predate it. */
+  pieces?: number | null;
 }
 
 export interface VehicleDescriptor {
@@ -557,9 +592,18 @@ export interface DeliveryUrl {
   vehicle: VehicleDescriptor;
   /** Which appearance the URL serves, and the market it was made for; absent on URLs made before 2026-11-12. */
   appearance?: Appearance;
+  /** This URL's campaign label (its own, else the batch's), when there is one; sealed into the URL. */
+  campaign?: string;
+  /** How many pieces this URL will appear in (its own count, else the batch's), when there is one; its loads are logged under it. */
+  pieces?: number;
 }
 
-export interface CreateImageUrlsOptions {
+/**
+ * Options for a whole `createImageUrls` batch. `campaign` and `pieces` here
+ * are the default for every image that names none of its own; `pieces` is
+ * per URL (each URL that takes the default declares that many).
+ */
+export interface CreateImageUrlsOptions extends CampaignTags {
   /** The market of sale for every image that names none of its own ({@link Market}). */
   market?: Market;
   /** 60–604800 seconds; server default 3600. */
@@ -596,6 +640,10 @@ export interface RenewalSummary {
 export interface CreateImageUrlsResponse {
   data: DeliveryUrl[];
   billing: BillingSummary & { charged_on: "creation"; credits_per_url?: number; renewal?: RenewalSummary | null };
+  /** The campaign label every URL of the mint shares, when they share one (also `X-Campaign`). Each URL's own label is on its item. */
+  campaign?: string;
+  /** The mint's declared pieces: the sum over its URLs' own counts, when any has one (also `X-Pieces`). */
+  pieces?: number;
   request_id: string;
   /**
    * True when the server answered from the response it stored for this
@@ -1776,6 +1824,59 @@ export interface AccountMembers {
     description: string | null;
     members: Array<{ name: string | null; email: string | null; role: "member" | "maintainer" }>;
   }>;
+}
+
+/** A window for `getCampaignUsage`: a date (`2026-11-01`, midnight UTC), an ISO 8601 timestamp or a Date. */
+export interface CampaignUsageParams {
+  /** Start, inclusive. Default: the start of the current UTC month. */
+  from?: string | Date;
+  /** End, exclusive; a date includes that whole UTC day. Default: now. At most 400 days after `from`. */
+  to?: string | Date;
+}
+
+export interface CampaignUsageTotals {
+  /** Requests that declared a campaign or pieces. */
+  requests: number;
+  pieces: number;
+  /** Loads of tagged delivery URLs in the window. */
+  loads: number;
+  campaigns: number;
+}
+
+export interface CampaignUsageByCampaign {
+  /** Null for requests that sent `pieces` without a campaign. */
+  campaign: string | null;
+  requests: number;
+  pieces: number;
+  loads: number;
+}
+
+export interface CampaignUsageByVehicle {
+  vehicle_id: VehicleId | null;
+  make: string;
+  model: string;
+  year: number;
+  requests: number;
+  pieces: number;
+  campaigns: string[];
+}
+
+/** GET /api/v1/account/campaigns: what requests were tagged with over `[from, to)`. */
+export interface CampaignUsage {
+  from: string;
+  to: string;
+  totals: CampaignUsageTotals;
+  /** Largest first, at most 500. */
+  by_campaign: CampaignUsageByCampaign[];
+  /** Largest first, at most 500. */
+  by_vehicle: CampaignUsageByVehicle[];
+  /** True when more than 500 campaigns or vehicles exist. */
+  truncated: boolean;
+}
+
+export interface CampaignUsageResponse {
+  data: CampaignUsage;
+  request_id: string;
 }
 
 export interface MembersResponse {
