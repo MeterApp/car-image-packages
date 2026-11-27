@@ -33,7 +33,9 @@ import {
   ASPECT_RATIOS,
   RESOLUTIONS,
   type Resolution,
+  MAX_CAMPAIGN_LENGTH,
   MAX_PADDING_PERCENT,
+  MAX_PIECES,
   MIN_YEAR,
   MODEL_3D_FILE_KINDS,
   REFERRAL_SOURCES,
@@ -327,6 +329,30 @@ const checkEntrySchema = z.object({
   market: z.string().max(80).optional().describe("This entry's own market of sale (a two-letter country code), when it differs from the list's market. Any other value is ignored."),
 });
 
+/**
+ * Campaign tracking labels (`campaign`, `pieces`): notes recorded beside an
+ * image request or a URL mint, never part of the image, its URL or its charge.
+ * One type each, read the way the server reads them.
+ */
+export const campaignSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_CAMPAIGN_LENGTH)
+  .regex(/^[^\u0000-\u001f\u007f-\u009f\u2028\u2029]*$/, "Use one line of text, without tabs or line breaks.")
+  .describe(
+    `Campaign tracking, optional: the campaign or send this image is for, one line of at most ${MAX_CAMPAIGN_LENGTH} characters (e.g. "Spring mailer 2026"), recorded for the account's campaign reports. Never changes the image or the charge. Only when the human names a campaign; not utm_campaign.`
+  );
+
+export const piecesSchema = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(MAX_PIECES)
+  .describe(
+    `Campaign tracking, optional: how many pieces (emails, mail pieces, impressions) this image or URL will appear in, a good-faith whole number from 1 to ${MAX_PIECES.toLocaleString("en-US")}. Recorded for campaign reports and per-piece invoicing; never changes the image or the charge. Only when the human gives a count.`
+  );
+
 export const imageInputSchema = z
   .object({
     ...vehicleFields,
@@ -385,6 +411,8 @@ export const imageInputSchema = z
         "png keeps the transparent background (default); webp is smallest; jpg is flattened onto white; auto lets each viewer's Accept header choose webp or png, negotiated on every load of a signed URL. An inline image (get_car_image) is delivered as png for auto."
       ),
     market: marketSchema.optional(),
+    campaign: campaignSchema.optional(),
+    pieces: piecesSchema.optional(),
   })
   .refine(namesOneVehicle, ONE_VEHICLE);
 
@@ -424,7 +452,7 @@ export const MCP_TOOL_SCHEMAS = {
       .array(imageInputSchema)
       .min(1)
       .max(50)
-      .describe("One to fifty image requests. Each URL counts its vehicle image (vehicle, color, angle) for the month when created; the same image again this month adds nothing."),
+      .describe("One to fifty image requests. Each URL counts its vehicle image (vehicle, color, angle) for the month when created; the same image again this month adds nothing. An image's own campaign and pieces override the batch's."),
     ttl_seconds: z.coerce
       .number()
       .int()
@@ -453,6 +481,8 @@ export const MCP_TOOL_SCHEMAS = {
       .optional()
       .describe("How long a renewable URL keeps renewing, 1 to 365 days from creation (default 365). Only with renew: true."),
     market: marketSchema.optional().describe("Market of sale for every image that names none of its own: a two-letter country code such as AU. Only when the human named a market; otherwise omit (the account's default applies, if set)."),
+    campaign: campaignSchema.optional().describe(`Campaign tracking, optional: the campaign label for every image that names none of its own, one line of at most ${MAX_CAMPAIGN_LENGTH} characters. Recorded for campaign reports; never changes an image or the charge. Only when the human names a campaign.`),
+    pieces: piecesSchema.optional().describe(`Campaign tracking, optional: the piece count for every image that names none of its own: how many pieces (emails, mail pieces, impressions) each such URL will appear in, 1 to ${MAX_PIECES.toLocaleString("en-US")}. Set pieces on each image when the counts differ.`),
     idempotency_key: z
       .string()
       .regex(IDEMPOTENCY_KEY_PATTERN, 'Use 1-255 characters of letters, digits, ".", "_", ":" or "-".')
@@ -1112,6 +1142,9 @@ export const MCP_TOOL_OUTPUT_SCHEMAS = {
     etag: z.string().nullable(),
     request_id: z.string().nullable(),
     vehicle: vehicleDescriptorSchema,
+    /** Campaign tracking: what was recorded, when the call named it. */
+    campaign: z.string().optional(),
+    pieces: z.number().int().optional(),
   }),
   create_car_image_urls: z.looseObject({
     data: z.array(
@@ -1127,6 +1160,9 @@ export const MCP_TOOL_OUTPUT_SCHEMAS = {
         /** Auto-renewing URLs keep serving, renewing in each opened window, until this instant. */
         renews_until: z.string().nullable().optional(),
         vehicle: vehicleDescriptorSchema,
+        /** This URL's campaign tracking labels (its own, else the batch's), when it has any. */
+        campaign: z.string().optional(),
+        pieces: z.number().int().optional(),
       })
     ),
     billing: z.looseObject({
@@ -1138,6 +1174,9 @@ export const MCP_TOOL_OUTPUT_SCHEMAS = {
       vehicle_images: meterCountSchema.optional(),
       renewal: z.looseObject({ window_seconds: z.number(), credits_per_window: z.number().optional(), until: z.string() }).nullable().optional(),
     }),
+    /** The campaign every URL shares, when they share one, and the sum of the URLs' pieces, when any has a count. */
+    campaign: z.string().optional(),
+    pieces: z.number().int().optional(),
     request_id: z.string(),
     /** True when a retry was answered from the result stored for its idempotency_key; nothing was billed again. */
     idempotent_replayed: z.boolean().optional(),
@@ -1843,7 +1882,7 @@ export const MCP_TOOLS: { [N in McpToolName]: McpToolDefinition<N> } = {
     name: "get_car_image",
     title: "Get car image bytes",
     description:
-      `In ChatGPT, use create_car_image_urls for the inline image card instead. In other hosts, show a vehicle in chat: returns the image as an MCP image the host displays inline with the result, and the bytes for a file. Name the vehicle, view and color in the reply; do not also mint a signed URL for the same image. Where the person cannot see tool images (a terminal), use create_car_image_urls instead. Counts one vehicle image (vehicle, color, angle) for the month on the account's plan, prepared yet or not; the same image again this month adds nothing. Legacy credit-meter accounts: COSTS ${CREDITS_PER_IMAGE} CREDIT per call, cached or generated. Call resolve_vehicle first (or search_vehicles, or decode_vin for a VIN) and pass the id it returns as \`vehicle\`: the lookup is free, and the catalog files cars under its own names (a Mazda "MX-5 Miata" is mx-5), so a make and model typed from memory can answer 404 for a car the catalog carries. Make, model and year are for callers that already hold catalog spellings. Nine camera angles, any paint color (fifteen named presets or any hex such as #1a2b3c), any width and height up to the stored image's own size, ${STORED_SIZE_NOTE} (fit contain|cover|inside), transparent or on a solid background, optionally trimmed to the car and with a soft ground shadow (shadow: true). Returns the image (PNG/WebP/JPG; format auto delivers PNG here) plus usage metadata (credits_charged, vehicle_images used this month, or credits_remaining on the credit meter; source cache|generated, request_id, the vehicle with its vehicle_id, verified_on: the UTC day these exact bytes were compared with the manufacturer's material for that model year and matched (verified), or null when not checked, which does not mean wrong). Use create_car_image_urls for web pages, apps, emails and documents, and in a terminal. Do not call both paid tools for one image.`,
+      `In ChatGPT, use create_car_image_urls for the inline image card instead. In other hosts, show a vehicle in chat: returns the image as an MCP image the host displays inline with the result, and the bytes for a file. Name the vehicle, view and color in the reply; do not also mint a signed URL for the same image. Where the person cannot see tool images (a terminal), use create_car_image_urls instead. Counts one vehicle image (vehicle, color, angle) for the month on the account's plan, prepared yet or not; the same image again this month adds nothing. Legacy credit-meter accounts: COSTS ${CREDITS_PER_IMAGE} CREDIT per call, cached or generated. Call resolve_vehicle first (or search_vehicles, or decode_vin for a VIN) and pass the id it returns as \`vehicle\`: the lookup is free, and the catalog files cars under its own names (a Mazda "MX-5 Miata" is mx-5), so a make and model typed from memory can answer 404 for a car the catalog carries. Make, model and year are for callers that already hold catalog spellings. Nine camera angles, any paint color (fifteen named presets or any hex such as #1a2b3c), any width and height up to the stored image's own size, ${STORED_SIZE_NOTE} (fit contain|cover|inside), transparent or on a solid background, optionally trimmed to the car and with a soft ground shadow (shadow: true). Returns the image (PNG/WebP/JPG; format auto delivers PNG here) plus usage metadata (credits_charged, vehicle_images used this month, or credits_remaining on the credit meter; source cache|generated, request_id, the vehicle with its vehicle_id, verified_on: the UTC day these exact bytes were compared with the manufacturer's material for that model year and matched (verified), or null when not checked, which does not mean wrong). Use create_car_image_urls for web pages, apps, emails and documents, and in a terminal. Do not call both paid tools for one image. Optional campaign and pieces tag the call for campaign reports.`,
     inputSchema: MCP_TOOL_SCHEMAS.get_car_image,
     outputSchema: MCP_TOOL_OUTPUT_SCHEMAS.get_car_image,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -1852,7 +1891,7 @@ export const MCP_TOOLS: { [N in McpToolName]: McpToolDefinition<N> } = {
     name: "create_car_image_urls",
     title: "Create signed car image URLs",
     description:
-      "Put vehicle images into web pages, apps, emails and documents: create 1-50 key-free signed URLs a browser loads directly (<img src>), each with ready-to-display Markdown. In ChatGPT, use this tool to show the inline image card. In other chat hosts, get_car_image displays the picture inline. For chat use ttl_seconds 604800, max_uses 0 and renewal off unless requested. When ChatGPT shows the card, do not repeat its images or URLs. Without a card, use the returned Markdown where supported or link the same URL. Reuse unexpired URLs; never mint twice for one image. Each URL counts its vehicle image for the month at creation (1 credit on the legacy credit meter); loads within the TTL add nothing and are publicly cacheable. Each image names its vehicle like get_car_image: look each distinct vehicle up once (resolve_vehicle, search_vehicles or decode_vin, all free) and pass its id as vehicle, or send make, model and year in catalog spelling. Each takes any paint color (a preset or a hex) and the same sizing options (width, height, fit, background, framing, trim, padding, shadow); format auto makes the URL serve webp or png per viewer. For email, CMS pages or documents that outlive a TTL, set renew: true with ttl_seconds 604800: the URL keeps serving past expiry, renewing in each opened week (one more credit per week on the legacy credit meter), for up to renew_days. Pass idempotency_key when the call might be repeated: a retry with the same key and arguments replays the first result instead of billing again. Returns id, url, markdown, expires_at, max_uses, renews_until and the normalized vehicle for each image. Prefer this over get_car_image for HTML, Markdown files, documents, emails and websites. State expiry briefly.",
+      "Put vehicle images into web pages, apps, emails and documents: create 1-50 key-free signed URLs a browser loads directly (<img src>), each with ready-to-display Markdown. In ChatGPT, use this tool to show the inline image card. In other chat hosts, get_car_image displays the picture inline. For chat use ttl_seconds 604800, max_uses 0 and renewal off unless requested. When ChatGPT shows the card, do not repeat its images or URLs. Without a card, use the returned Markdown where supported or link the same URL. Reuse unexpired URLs; never mint twice for one image. Each URL counts its vehicle image for the month at creation (1 credit on the legacy credit meter); loads within the TTL add nothing and are publicly cacheable. Each image names its vehicle like get_car_image: look each distinct vehicle up once (resolve_vehicle, search_vehicles or decode_vin, all free) and pass its id as vehicle, or send make, model and year in catalog spelling. Each takes any paint color (a preset or a hex) and the same sizing options (width, height, fit, background, framing, trim, padding, shadow); format auto makes the URL serve webp or png per viewer. For email, CMS pages or documents that outlive a TTL, set renew: true with ttl_seconds 604800: the URL keeps serving past expiry, renewing in each opened week (one more credit per week on the legacy credit meter), for up to renew_days. Pass idempotency_key when the call might be repeated: a retry with the same key and arguments replays the first result instead of billing again. Returns id, url, markdown, expires_at, max_uses, renews_until and the normalized vehicle for each image. Prefer this over get_car_image for HTML, Markdown files, documents, emails and websites. For a mailer or email send, pass campaign and each image's pieces (how many pieces it appears in) when the human gives them; they never change an image or the charge. State expiry briefly.",
     inputSchema: MCP_TOOL_SCHEMAS.create_car_image_urls,
     outputSchema: MCP_TOOL_OUTPUT_SCHEMAS.create_car_image_urls,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },

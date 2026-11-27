@@ -39,7 +39,7 @@ Six commands cover what most people do; the rest are in the next table and behin
 | --- | --- |
 | `login [--no-browser] [--client-name <name>]` | Device-flow sign-in. Opens the browser, shows the code, polls, stores the key at `$CAR_IMAGE_CONFIG` or `$XDG_CONFIG_HOME/car-image-api/config.json` (default `~/.config/…`) with mode `0600`. The key is printed once. |
 | `get (--make --model --year \| --vehicle veh_…) [--view] [--color preset\|<hex>] [--size \| --width [--height] [--fit contain\|cover\|inside]] [--background transparent\|white\|black\|<hex>] [--framing consistent\|tight\|balanced \| --trim [--padding 0-50]] [--shadow] [--format png\|webp\|jpg\|auto] [--out file\|-] [--url] [--json]` | Downloads one image (one vehicle image of the month; the same image again adds nothing). `--url` prints a signed URL instead. `--vehicle` takes a stable id from `search`, `resolve` or `vin`; `--color` takes a preset or any hex (`#1a2b3c`, `1a2b3c`, `#abc`). See [Sizing, backgrounds and trimming](#sizing-backgrounds-and-trimming). |
-| `url (--make … \| --vehicle …) [--view] [--color] [--size\|--width\|--height] [--fit] [--background] [--framing\|--trim] [--shadow] [--format] [--ttl 3600] [--max-uses 0] [--renew [--renew-days 365]] [--idempotency-key <key>] [--json]` · `url --batch images.json […]` | Creates one signed delivery URL, or up to 50 from a JSON file; each counts its vehicle image of the month when created, and loads add nothing. `--renew` keeps a URL alive past the TTL, for email and documents. Entries of a batch file name the car by `make`, `model`, `year` or by `vehicle`, and may carry `view`, `color`, `size`, `width`, `height`, `fit`, `background`, `framing`, `trim`, `padding`, `shadow` and `format`. |
+| `url (--make … \| --vehicle …) [--view] [--color] [--size\|--width\|--height] [--fit] [--background] [--framing\|--trim] [--shadow] [--format] [--campaign <label>] [--pieces <count>] [--ttl 3600] [--max-uses 0] [--renew [--renew-days 365]] [--idempotency-key <key>] [--json]` · `url --batch images.json […]` | Creates one signed delivery URL, or up to 50 from a JSON file; each counts its vehicle image of the month when created, and loads add nothing. `--renew` keeps a URL alive past the TTL, for email and documents. Entries of a batch file name the car by `make`, `model`, `year` or by `vehicle`, and may carry `view`, `color`, `size`, `width`, `height`, `fit`, `background`, `framing`, `trim`, `padding`, `shadow` and `format`, and `campaign` and `pieces` for [campaign tracking](#campaign-tracking). |
 | `search <query…> [--limit] [--year]` | Fuzzy catalog search (free, no key). `--json` shows each model hit's vehicle ids per year. |
 | `vin <VIN> [--year <year>] [--json]` | Decodes a full or partial VIN (`*` for unknown positions) with NHTSA data: year, make, model, trim, body, engine, transmission, plant, and the catalog vehicle it maps to with a ready `car-image get --vehicle …`. Free, key required. |
 | `doctor [--json] [--yes] [--no-image]` | Smoke-tests every endpoint: health, options, vehicles years/makes/models, search, resolve, account, signed-URL mint + HEAD/GET redeem, optional keyed image GET (asks unless `--yes`); both use the same vehicle image of the month. Prints check / status / latency / cache / credits / notes and fix hints; exit 1 on any failure. |
@@ -49,7 +49,7 @@ Six commands cover what most people do; the rest are in the next table and behin
 | Command | What it does |
 | --- | --- |
 | `car-image` | Interactive onboarding on a TTY (login if needed → `whoami` → free quick check → next steps). Prints help when not interactive. |
-| `whoami` (alias `status`) · `logout` | The plan and what its license allows, this month's vehicle images, credits (for 3D models and logos), payment method, 30-day usage, masked key prefix and scopes, base URL · remove the stored key. |
+| `whoami` (alias `status`) · `whoami campaigns [--from] [--to]` · `logout` | The plan and what its license allows, this month's vehicle images, credits (for 3D models and logos), payment method, 30-day usage, masked key prefix and scopes, base URL · pieces, requests and loads by campaign and by vehicle ([campaign tracking](#campaign-tracking)) · remove the stored key. |
 | `resolve <free text…>` | Free text → exact parameters (with the vehicle id), candidates, confidence (`high`, `medium` or `low`) and a ready-to-run `car-image get …`. |
 | `check <file.csv\|file.json\|-> [--out <file>] [--format csv\|json] [--json]` (alias `coverage`) | Checks which vehicles of a list the catalog carries, each read the way `get` reads it; `--out` writes the file back with `status`, `vehicle_id`, the catalog spelling, `match`, `reason` and `suggested_vehicle_id` beside each row. Any length, 2,000 vehicles per request. Free, key required. See [Backfill a catalog](#backfill-a-catalog). |
 | `options` · `describe [operationId\|path\|all] [--json]` | Views (with yaw), colors, sizes, fit modes, backgrounds, trim limits, formats, pricing, catalog coverage, vehicle ids · the REST API explained from `/openapi.json`. |
@@ -158,6 +158,17 @@ Without `--wait` the command returns at once with the request id; `3d get <id>` 
 ```bash
 car-image url --batch listing-4711.json --ttl 604800 --idempotency-key listing-4711-v1 --json
 ```
+
+## Campaign tracking
+
+`get`, `get --url` and `url` take `--campaign <label>` (the campaign or send, one line of at most 100 characters) and `--pieces <count>` (how many pieces — emails, mail pieces, impressions — the image or URL will appear in, 1 to 10,000,000). They are recorded with the request for campaign reports and Enterprise usage reporting and never change the image or the charge. With `--batch` they are the default for entries that name none, and each entry may carry its own `campaign` and `pieces`:
+
+```bash
+car-image url --batch owners-mailer.json --campaign "Owners mailer Nov" --ttl 604800 --renew --json
+car-image whoami campaigns --from 2026-11-01
+```
+
+`whoami campaigns [--from <date>] [--to <date>]` (free, `account:read`) shows pieces, requests and URL loads by campaign, and the vehicles each campaign used.
 
 ## Agents (MCP)
 

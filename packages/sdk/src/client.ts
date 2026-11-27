@@ -5,7 +5,7 @@ import type {
   PackImageResult, PackListResponse, PackManifestResponse, PackQuality, PackQuoteResponse, PackResponse, PackUnit,
 } from "./packs.js";
 import { IMAGE_REPORT_CATEGORIES, IMAGE_REPORT_EXTERNAL_REF_MAX_LENGTH, IMAGE_REPORT_REASON_MAX_LENGTH, IMAGE_REPORT_TYPES } from "./types.js";
-import { imageRequestBody, imageSearchParams, makeLogoSearchParams, isColor, normalizeMarket, normalizeYear, vehicleRequestBody } from "./params.js";
+import { campaignTags, imageRequestBody, imageSearchParams, makeLogoSearchParams, isColor, normalizeMarket, normalizeYear, vehicleRequestBody } from "./params.js";
 import { RETRYABLE_STATUSES, backoffDelayMs, retryDelayMs } from "./retry.js";
 import {
   COLORS,
@@ -16,6 +16,9 @@ import {
   REFERRAL_SOURCES,
   VEHICLE_ID_PATTERN,
   type AccountResponse,
+  type CampaignTags,
+  type CampaignUsageParams,
+  type CampaignUsageResponse,
   type MembersResponse,
   type BuildingResponse,
   type PlanCheckoutResponse,
@@ -46,6 +49,7 @@ import {
   type FetchLike,
   type HealthResponse,
   type ImageParams,
+  type TaggedImageParams,
   type MakeLogoParams,
   type ImageResult,
   type ImageSource,
@@ -214,6 +218,37 @@ function verifiedHeader(headers: Headers): string | null {
   return raw !== null && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 }
 
+/** `X-Campaign`, percent-encoded UTF-8; null when absent or undecodable. */
+function campaignHeader(headers: Headers): string | null {
+  const raw = headers.get("x-campaign");
+  if (raw === null || raw === "") return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Query string for GET /api/v1/images/car: the image's parameters, then its campaign tracking labels. */
+function taggedImageSearch(params: TaggedImageParams): URLSearchParams {
+  const search = imageSearchParams(params);
+  const tags = campaignTags(params);
+  if (tags.campaign !== undefined) search.set("campaign", tags.campaign);
+  if (tags.pieces !== undefined) search.set("pieces", String(tags.pieces));
+  return search;
+}
+
+/** A `getCampaignUsage` bound: a Date as an ISO timestamp, a string as given. */
+function usageBound(value: string | Date | undefined, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) throw new RangeError(`${name} is an invalid Date`);
+    return value.toISOString();
+  }
+  if (typeof value !== "string" || !value.trim()) throw new TypeError(`${name} must be a date such as 2026-11-01, an ISO 8601 timestamp or a Date`);
+  return value.trim();
+}
+
 function vehicleIdHeader(headers: Headers): VehicleId | null {
   const raw = headers.get("x-vehicle-id");
   return raw !== null && VEHICLE_ID_PATTERN.test(raw) ? raw : null;
@@ -362,10 +397,11 @@ export class CarImageClient {
    * counts one vehicle image for the month (vehicle, color and angle; every
    * further delivery of it, at any size or format, is included) and costs no
    * credits (`usage`); legacy credit-meter accounts pay 1 credit
-   * (`creditsRemaining`).
+   * (`creditsRemaining`). `campaign` and `pieces` tag the request for
+   * campaign tracking ({@link CampaignTags}) and never change the image.
    */
-  async getImage(params: ImageParams, options: RequestOptions = {}): Promise<ImageResult> {
-    const response = await this.send(`/api/v1/images/car?${imageSearchParams(params)}`, {
+  async getImage(params: TaggedImageParams, options: RequestOptions = {}): Promise<ImageResult> {
+    const response = await this.send(`/api/v1/images/car?${taggedImageSearch(params)}`, {
       ...options,
       accept: "image/png, image/webp, image/jpeg, image/*;q=0.9, application/problem+json;q=0.8",
     });
@@ -384,6 +420,8 @@ export class CarImageClient {
       vehicleId: vehicleIdHeader(response.headers),
       appearance: appearanceHeader(response.headers),
       verifiedOn: verifiedHeader(response.headers),
+      campaign: campaignHeader(response.headers),
+      pieces: intHeader(response.headers, "x-pieces"),
     };
   }
 
@@ -411,8 +449,8 @@ export class CarImageClient {
   }
 
   /** GET /api/v1/images/car with `Accept: application/json` — a signed URL; counts the vehicle image like `getImage` (1 credit on the legacy credit meter). */
-  async getImageUrl(params: ImageParams, options: RequestOptions = {}): Promise<ImageUrlResponse> {
-    const response = await this.send(`/api/v1/images/car?${imageSearchParams(params)}`, {
+  async getImageUrl(params: TaggedImageParams, options: RequestOptions = {}): Promise<ImageUrlResponse> {
+    const response = await this.send(`/api/v1/images/car?${taggedImageSearch(params)}`, {
       ...options,
       accept: "application/json",
     });
@@ -473,17 +511,25 @@ export class CarImageClient {
    * image counts once for the month when the URL is made (`billing.vehicle_images`),
    * and loads and renewals add nothing; legacy credit-meter accounts pay 1
    * credit per URL at creation and one per renewed window.
+   *
+   * Campaign tracking: `campaign` and `pieces` on an image are that URL's
+   * own; in `options` they are the default for every image that names none.
+   * Each `data[]` item echoes its labels, and the top-level `pieces` is the
+   * sum over the URLs. They never change an image or the charge.
    */
   async createImageUrls(
-    images: ImageParams | ImageParams[],
+    images: TaggedImageParams | TaggedImageParams[],
     options: CreateImageUrlsOptions & RequestOptions = {}
   ): Promise<CreateImageUrlsResponse> {
     const list = Array.isArray(images) ? images : [images];
     if (list.length < 1 || list.length > 50) {
       throw new RangeError(`createImageUrls accepts 1 to 50 images (received ${list.length})`);
     }
-    const { ttlSeconds, maxUses, renew, renewDays, idempotencyKey, market, ...request } = options;
-    const body: Record<string, unknown> = { images: list.map(imageRequestBody) };
+    const { ttlSeconds, maxUses, renew, renewDays, idempotencyKey, market, campaign, pieces, ...request } = options;
+    const body: Record<string, unknown> = {
+      images: list.map((image) => ({ ...imageRequestBody(image), ...campaignTags(image) })),
+      ...campaignTags({ campaign, pieces } satisfies CampaignTags),
+    };
     if (market !== undefined) body.market = normalizeMarket(market);
     if (ttlSeconds !== undefined) body.ttl_seconds = ttlSeconds;
     if (maxUses !== undefined) body.max_uses = maxUses;
@@ -1094,6 +1140,23 @@ export class CarImageClient {
   async account(options: RequestOptions = {}): Promise<AccountResponse> {
     const response = await this.send("/api/v1/account", options);
     return this.json<AccountResponse>(response);
+  }
+
+  /**
+   * GET /api/v1/account/campaigns — campaign tracking over `[from, to)`
+   * (default: this UTC month so far): totals, pieces and requests by campaign
+   * with the delivery-URL loads logged under each, and pieces by vehicle with
+   * the campaigns that used it. Needs `account:read`; free.
+   */
+  async getCampaignUsage(params: CampaignUsageParams = {}, options: RequestOptions = {}): Promise<CampaignUsageResponse> {
+    const search = new URLSearchParams();
+    const from = usageBound(params.from, "from");
+    const to = usageBound(params.to, "to");
+    if (from !== undefined) search.set("from", from);
+    if (to !== undefined) search.set("to", to);
+    const query = search.size ? `?${search}` : "";
+    const response = await this.send(`/api/v1/account/campaigns${query}`, options);
+    return this.json<CampaignUsageResponse>(response);
   }
 
   /** GET /api/v1/account/members — the organization's members and teams with their roles, read only. */

@@ -151,6 +151,75 @@ describe("car-image get and url with vehicle ids and hex paint", () => {
     expect(seen[1]?.body).toEqual({ images: [{ vehicle: "veh_395yw8tn73ff8", color: "1a2b3c" }, { make: "Porsche", model: "911", year: 2024, color: "red" }] });
   });
 
+  it("tags get, get --url and url with --campaign and --pieces, and each batch entry with its own", async () => {
+    const image = () => new Response(PNG, { headers: { "Content-Type": "image/png", "X-Campaign": encodeURIComponent("Spring mailer"), "X-Pieces": "25000" } });
+    const signed = () => Response.json({ data: { url: "https://u", expires_at: "x", vehicle: {}, width: null, height: null, format: "png" }, billing: { credits_charged: 0 }, request_id: "r" });
+    const created = () => Response.json({ data: [{ url: "https://u/1", expires_at: "x", max_uses: 0 }], billing: { charged_on: "creation", credits_charged: 0 }, campaign: "Owners mailer", pieces: 8300, request_id: "r" }, { status: 201 });
+    const { fetchImpl, seen } = mockFetch([image, signed, created, created]);
+    expect(await run(["get", "--vehicle", "veh_395yw8tn73ff8", "--campaign", "Spring mailer", "--pieces", "25000", "--out", join(dir, "a.png"), "--json"], fetchImpl)).toBe(0);
+    const query = new URL(seen[0]!.url).searchParams;
+    expect(query.get("campaign")).toBe("Spring mailer");
+    expect(query.get("pieces")).toBe("25000");
+    expect(JSON.parse(out.join(""))).toMatchObject({ campaign: "Spring mailer", pieces: 25000 });
+    expect(await run(["get", "--vehicle", "veh_395yw8tn73ff8", "--url", "--pieces", "12"], fetchImpl)).toBe(0);
+    expect(new URL(seen[1]!.url).searchParams.get("pieces")).toBe("12");
+    expect(await run(["url", "--vehicle", "veh_395yw8tn73ff8", "--campaign", "Owners mailer", "--pieces", "8300"], fetchImpl)).toBe(0);
+    expect(seen[2]?.body).toEqual({ images: [{ vehicle: "veh_395yw8tn73ff8" }], campaign: "Owners mailer", pieces: 8300 });
+    expect(err.join("")).toContain('campaign "Owners mailer", 8,300 pieces');
+    const batch = join(dir, "batch.json");
+    await writeFile(batch, JSON.stringify([{ vehicle: "veh_395yw8tn73ff8", pieces: 3200 }, { make: "Ford", model: "F-150", year: 2024, pieces: 5100, campaign: "Ford owners" }]));
+    expect(await run(["url", "--batch", batch, "--campaign", "Owners mailer", "--json"], fetchImpl)).toBe(0);
+    expect(seen[3]?.body).toEqual({
+      images: [{ vehicle: "veh_395yw8tn73ff8", pieces: 3200 }, { make: "Ford", model: "F-150", year: 2024, pieces: 5100, campaign: "Ford owners" }],
+      campaign: "Owners mailer",
+    });
+  });
+
+  it("refuses malformed campaign labels before any request", async () => {
+    for (const args of [["--pieces", "0"], ["--pieces", "2,500"], ["--pieces", "2.5e3"], ["--pieces", "10000001"], ["--campaign", "x".repeat(101)]]) {
+      err = [];
+      expect(await run(["get", "--vehicle", "veh_395yw8tn73ff8", ...args]), args.join(" ")).toBe(2);
+      expect(err.join("")).toMatch(/--(pieces|campaign)/);
+    }
+    err = [];
+    expect(await run(["logo", "--make", "BMW", "--campaign", "x"])).toBe(2);
+    expect(err.join("")).toContain("--campaign is not supported for make logos");
+    const batch = join(dir, "bad.json");
+    await writeFile(batch, JSON.stringify([{ vehicle: "veh_395yw8tn73ff8", pieces: 0 }]));
+    err = [];
+    expect(await run(["url", "--batch", batch])).toBe(2);
+    expect(err.join("")).toContain("Batch entry 0");
+  });
+
+  it("shows campaign tracking with whoami campaigns", async () => {
+    const usage = () =>
+      Response.json({
+        data: {
+          from: "2026-11-01T00:00:00.000Z",
+          to: "2026-11-28T00:00:00.000Z",
+          totals: { requests: 2, pieces: 8300, loads: 40, campaigns: 1 },
+          by_campaign: [{ campaign: "Owners mailer", requests: 2, pieces: 8300, loads: 40 }, { campaign: null, requests: 1, pieces: 5, loads: 0 }],
+          by_vehicle: [{ vehicle_id: "veh_395yw8tn73ff8", make: "toyota", model: "camry", year: 2024, requests: 1, pieces: 3200, campaigns: ["Owners mailer"] }],
+          truncated: false,
+        },
+        request_id: "r",
+      });
+    const { fetchImpl, seen } = mockFetch([usage, usage]);
+    expect(await run(["whoami", "campaigns", "--from", "2026-11-01", "--to", "2026-11-28"], fetchImpl)).toBe(0);
+    const url = new URL(seen[0]!.url);
+    expect(url.pathname).toBe("/api/v1/account/campaigns");
+    expect(url.searchParams.get("from")).toBe("2026-11-01");
+    const text = out.join("");
+    expect(text).toContain("8,300 pieces over 2 tagged requests");
+    expect(text).toContain("Owners mailer");
+    expect(text).toContain("(no campaign)");
+    expect(text).toContain("2024 toyota camry");
+    out = [];
+    expect(await run(["account", "campaigns", "--json"], fetchImpl)).toBe(0);
+    expect(JSON.parse(out.join("")).data.totals.pieces).toBe(8300);
+    expect(await run(["whoami", "bogus"])).toBe(2);
+  });
+
   it("rejects both selectors, a missing selector and a made-up color before any request", async () => {
     expect(await run(["get", "--vehicle", "veh_395yw8tn73ff8", "--make", "Porsche"])).toBe(2);
     expect(err.join("")).toContain("not both");

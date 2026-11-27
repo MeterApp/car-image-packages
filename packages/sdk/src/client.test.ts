@@ -860,3 +860,97 @@ describe("the market of sale", () => {
     expect(calls[4].body).toEqual({ kind: "vehicle", make: "Ford", model: "Ranger", year: 2022, market: "AU" });
   });
 });
+
+describe("campaign tracking", () => {
+  const image = (headers: Record<string, string> = {}) =>
+    new Response(new Uint8Array([1, 2]), { headers: { "Content-Type": "image/png", "X-Credits-Charged": "0", "X-Image-Source": "cache", ...headers } });
+  const minted = (extra: Record<string, unknown> = {}) =>
+    Response.json({ data: [], billing: { charged_on: "creation", credits_charged: 0 }, request_id: "r", ...extra }, { status: 201 });
+
+  it("getImage and getImageUrl send campaign and pieces as query parameters and read the echo", async () => {
+    const urlBody = { data: { url: "https://u", expires_at: "x", vehicle: {}, width: null, height: null, format: "png" }, billing: { credits_charged: 0 }, request_id: "r" };
+    const { instance, calls } = client([image({ "X-Campaign": encodeURIComponent("Spring mailer · 2026"), "X-Pieces": "25000" }), image(), Response.json(urlBody)]);
+    const tagged = await instance.getImage({ vehicle: "veh_395yw8tn73ff8", campaign: "  Spring mailer · 2026 ", pieces: 25_000 });
+    const query = new URL(calls[0]!.url).searchParams;
+    expect(query.get("campaign")).toBe("Spring mailer · 2026");
+    expect(query.get("pieces")).toBe("25000");
+    expect(tagged).toMatchObject({ campaign: "Spring mailer · 2026", pieces: 25_000 });
+    const plain = await instance.getImage({ vehicle: "veh_395yw8tn73ff8", campaign: "   " });
+    // A blank label reads as none, as on the server.
+    expect(new URL(calls[1]!.url).searchParams.has("campaign")).toBe(false);
+    expect(plain).toMatchObject({ campaign: null, pieces: null });
+    await instance.getImageUrl({ vehicle: "veh_395yw8tn73ff8", pieces: 3 });
+    expect(new URL(calls[2]!.url).searchParams.get("pieces")).toBe("3");
+  });
+
+  it("never puts the labels into an image's keyless URL", () => {
+    const { instance } = client([]);
+    const url = instance.cachedImageUrl({ vehicle: "veh_395yw8tn73ff8", campaign: "Spring", pieces: 10 } as never);
+    expect(url).toBe(instance.cachedImageUrl({ vehicle: "veh_395yw8tn73ff8" }));
+  });
+
+  it("createImageUrls sends the batch's labels beside images and each image's own on it", async () => {
+    const echo = {
+      data: [{ id: "a", campaign: "Owners mailer Nov", pieces: 3200 }, { id: "b", campaign: "Owners mailer Nov", pieces: 5100 }],
+      campaign: "Owners mailer Nov",
+      pieces: 8300,
+    };
+    const { instance, calls } = client([minted(echo), minted()]);
+    const result = await instance.createImageUrls(
+      [{ make: "Toyota", model: "Camry", year: 2024, pieces: 3200 }, { make: "Ford", model: "F-150", year: 2024, pieces: 5100, campaign: "Ford owners" }],
+      { campaign: "Owners mailer Nov", pieces: 1 }
+    );
+    expect(calls[0]!.body).toEqual({
+      images: [{ make: "Toyota", model: "Camry", year: 2024, pieces: 3200 }, { make: "Ford", model: "F-150", year: 2024, pieces: 5100, campaign: "Ford owners" }],
+      campaign: "Owners mailer Nov",
+      pieces: 1,
+    });
+    expect(result.pieces).toBe(8300);
+    expect(result.data[1]?.pieces).toBe(5100);
+    await instance.createImageUrls({ vehicle: "veh_395yw8tn73ff8" });
+    expect(calls[1]!.body).toEqual({ images: [{ vehicle: "veh_395yw8tn73ff8" }] });
+  });
+
+  it("checks the labels the way the server reads them, before any request", async () => {
+    const { instance, fetchImpl } = client([]);
+    const car = { vehicle: "veh_395yw8tn73ff8" };
+    for (const pieces of [0, -1, 2.5, 10_000_001, Number.NaN]) {
+      await expect(instance.getImage({ ...car, pieces })).rejects.toThrow(RangeError);
+    }
+    await expect(instance.getImage({ ...car, pieces: "25" as unknown as number })).rejects.toThrow(RangeError);
+    await expect(instance.getImage({ ...car, campaign: "x".repeat(101) })).rejects.toThrow(/at most 100/);
+    await expect(instance.getImage({ ...car, campaign: "line\nbreak" })).rejects.toThrow(TypeError);
+    await expect(instance.getImage({ ...car, campaign: "tab\there" })).rejects.toThrow(TypeError);
+    await expect(instance.createImageUrls([{ ...car, campaign: 7 as unknown as string }])).rejects.toThrow(TypeError);
+    await expect(instance.createImageUrls(car, { pieces: 0 })).rejects.toThrow(RangeError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    // 100 characters counted as code points (an emoji is one), and the upper bound itself.
+    const { instance: ok, calls } = client([image(), image()]);
+    await ok.getImage({ ...car, campaign: "🚗".repeat(100), pieces: 10_000_000 });
+    expect(new URL(calls[0]!.url).searchParams.get("pieces")).toBe("10000000");
+  });
+
+  it("getCampaignUsage reads GET /api/v1/account/campaigns with an optional window", async () => {
+    const usage = {
+      data: {
+        from: "2026-11-01T00:00:00.000Z",
+        to: "2026-11-28T00:00:00.000Z",
+        totals: { requests: 2, pieces: 8300, loads: 40, campaigns: 1 },
+        by_campaign: [{ campaign: "Owners mailer Nov", requests: 2, pieces: 8300, loads: 40 }],
+        by_vehicle: [{ vehicle_id: "veh_395yw8tn73ff8", make: "toyota", model: "camry", year: 2024, requests: 1, pieces: 3200, campaigns: ["Owners mailer Nov"] }],
+        truncated: false,
+      },
+      request_id: "r",
+    };
+    const { instance, calls } = client([Response.json(usage), Response.json(usage)]);
+    const result = await instance.getCampaignUsage({ from: "2026-11-01", to: new Date("2026-11-28T00:00:00Z") });
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/api/v1/account/campaigns");
+    expect(url.searchParams.get("from")).toBe("2026-11-01");
+    expect(url.searchParams.get("to")).toBe("2026-11-28T00:00:00.000Z");
+    expect(result.data.totals.pieces).toBe(8300);
+    await instance.getCampaignUsage();
+    expect(calls[1]!.url).toBe("https://api.example.test/api/v1/account/campaigns");
+    await expect(instance.getCampaignUsage({ from: new Date("nope") })).rejects.toThrow(RangeError);
+  });
+});

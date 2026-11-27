@@ -5,11 +5,14 @@ import {
   FRAMINGS,
   HEX_COLOR_PATTERN,
   MARKET_PATTERN,
+  MAX_CAMPAIGN_LENGTH,
   MAX_PADDING_PERCENT,
+  MAX_PIECES,
   RESOLUTIONS,
   SIZES,
   VIEW_ALIASES,
   VIEWS,
+  type CampaignTags,
   type Color,
   type ImageParams,
   type MakeLogoParams,
@@ -170,6 +173,52 @@ export function vehicleRequestBody(selector: VehicleSelector): Pick<ImageRequest
   if (selector.model !== undefined) body.model = String(selector.model).trim();
   if (selector.year !== undefined) body.year = normalizeYear(selector.year);
   return body;
+}
+
+// Control characters (C0, DEL, C1) and the line and paragraph separators, as the server refuses them.
+const CAMPAIGN_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/**
+ * A `campaign` label as the server records it: NFC, trimmed, 1 to 100
+ * characters, one line. Blank (or all-space) reads as none and returns
+ * undefined, as on the server. Throws for anything else.
+ */
+export function normalizeCampaign(campaign: unknown): string | undefined {
+  if (campaign === undefined || campaign === null) return undefined;
+  if (typeof campaign !== "string") throw new TypeError(`campaign must be a string of at most ${MAX_CAMPAIGN_LENGTH} characters`);
+  const trimmed = campaign.normalize("NFC").trim();
+  if (trimmed === "") return undefined;
+  if (CAMPAIGN_CONTROL.test(trimmed)) {
+    throw new TypeError("campaign must be one line of text, without control characters such as tabs or line breaks");
+  }
+  if ([...trimmed].length > MAX_CAMPAIGN_LENGTH) {
+    throw new RangeError(`campaign must be at most ${MAX_CAMPAIGN_LENGTH} characters (received ${[...trimmed].length})`);
+  }
+  return trimmed;
+}
+
+/** A `pieces` count: a whole number from 1 to 10,000,000. Throws for anything else. */
+export function normalizePieces(pieces: unknown): number | undefined {
+  if (pieces === undefined || pieces === null) return undefined;
+  if (typeof pieces !== "number" || !Number.isSafeInteger(pieces) || pieces < 1 || pieces > MAX_PIECES) {
+    throw new RangeError(`Invalid pieces ${String(pieces)}: expected a whole number from 1 to ${MAX_PIECES.toLocaleString("en-US")}`);
+  }
+  return pieces;
+}
+
+/**
+ * The campaign tracking fields to send, checked the way the server reads
+ * them: `{ campaign?, pieces? }` with only what was given. Never part of an
+ * image's query or cache key.
+ */
+export function campaignTags(tags: CampaignTags | undefined): CampaignTags {
+  const out: CampaignTags = {};
+  if (!tags) return out;
+  const campaign = normalizeCampaign(tags.campaign);
+  const pieces = normalizePieces(tags.pieces);
+  if (campaign !== undefined) out.campaign = campaign;
+  if (pieces !== undefined) out.pieces = pieces;
+  return out;
 }
 
 /** Query string for GET /api/v1/images/car. */
